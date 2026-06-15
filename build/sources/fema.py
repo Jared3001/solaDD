@@ -14,10 +14,20 @@ zone + panel + effective date go to Notes.
 NOTE: layer ids should be confirmed against the live service on first run
 (ArcGIS layer ordering can change); requires outbound HTTPS to hazards.fema.gov.
 """
-import json, urllib.parse, urllib.request
+import datetime, json, urllib.parse, urllib.request
 
 NFHL = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer"
-LAYER_FLOOD, LAYER_PANEL = 28, 3
+LAYER_FLOOD, LAYER_PANEL = 28, 3   # confirmed live 2026-06-15: 28=Flood Hazard Zones, 3=FIRM Panels
+
+
+def _fmt_eff_date(v):
+    """NFHL EFF_DATE is epoch milliseconds; render as ISO date for the Notes cell."""
+    if v in (None, ""):
+        return None
+    try:
+        return datetime.datetime.fromtimestamp(int(v) / 1000, datetime.timezone.utc).date().isoformat()
+    except (ValueError, TypeError, OSError):
+        return str(v)
 
 
 def _point_query(layer: int, lon: float, lat: float, out_fields: str, timeout: int = 30) -> list:
@@ -45,7 +55,7 @@ def flood_zone(lon: float, lat: float) -> dict:
     pa = panel[0]["attributes"] if panel else {}
     note = (f"Zone {a.get('FLD_ZONE')}"
             + (f" ({a.get('ZONE_SUBTY')})" if a.get("ZONE_SUBTY") else "")
-            + f"; FIRM panel {pa.get('FIRM_PAN')}, eff. {pa.get('EFF_DATE')}. Source: FEMA NFHL REST.")
+            + f"; FIRM panel {pa.get('FIRM_PAN')}, eff. {_fmt_eff_date(pa.get('EFF_DATE'))}. Source: FEMA NFHL REST.")
     return {"answer": "Yes" if in_sfha else "No", "notes": note}
 
 
