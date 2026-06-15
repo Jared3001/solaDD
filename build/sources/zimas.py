@@ -25,6 +25,8 @@ fields route to local planning (left manual), never invented.
 NOT available via REST (stay manual): transitional_height_adj_zones (C46) and
 special_grading_area_la (C56) — ZIMAS derives both in its locked backend.
 """
+import re
+
 import _arcgis as ag
 
 NAV = "https://maps.lacity.org/arcgis/rest/services/Mapping/NavigateLA/MapServer"
@@ -36,6 +38,10 @@ L_PARCEL, L_ZONE, L_SPECPLAN, L_HPOZ, L_HCM, L_METHANE = 395, 71, 93, 75, 74, 35
 L_TOC, L_AB2097 = 11, 56
 
 _SNAP = {}   # (round lon,lat) -> (parcel_attrs, (rlon, rlat))
+_SNAP_BUFFER_M = 150   # search radius: geocoded points can sit ~80 m off the lot
+_DIRS = {"N", "S", "E", "W", "NE", "NW", "SE", "SW"}
+_SUFFIXES = {"ST", "AVE", "AV", "BLVD", "BL", "DR", "RD", "PL", "CT", "WAY", "LN",
+             "TER", "CIR", "HWY", "PKWY", "PKY", "PLZ", "ROW", "WALK", "TRL"}
 
 
 def _poly_repr_point(geom):
@@ -47,27 +53,56 @@ def _poly_repr_point(geom):
     return sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
 
 
+def _addr_parts(addr):
+    """(house_number:int|None, street_token:str|None) from an address string."""
+    head = (addr or "").split(",")[0]
+    toks = head.replace(".", "").upper().split()
+    num = int(toks[0]) if toks and toks[0].isdigit() else None
+    words = [t for t in toks[1:] if t not in _DIRS and t not in _SUFFIXES and not t.isdigit()]
+    street = max(words, key=len) if words else None     # the distinctive street word
+    return num, street
+
+
+def _tooltip_house_no(tooltip):
+    m = re.match(r"\s*(\d+)", tooltip or "")
+    return int(m.group(1)) if m else None
+
+
 def _snapped(geo):
+    """Snap the geocoded point to the right fee parcel.
+
+    The Census geocoder is block-level and can land ~80 m off the lot, so
+    nearest-parcel alone can grab the wrong (or a non-fee 'BRK') parcel. We pull
+    every parcel within a generous buffer and select by ADDRESS first — same
+    street + closest house number — falling back to nearest-by-distance only when
+    the address can't be parsed/matched. Returns (parcel_attrs, (rlon, rlat)).
+    """
     key = (round(geo["lon"], 6), round(geo["lat"], 6))
     if key in _SNAP:
         return _SNAP[key]
     lon, lat = geo["lon"], geo["lat"]
-    feats = ag.query(NAV, L_PARCEL, lon=lon, lat=lat, return_geometry=True,
-                     out_fields="PIN,PIND,BPP,CNCL_DIST")
-    if not feats:   # geocoded point sat on the street — buffer and take nearest
-        feats = ag.query(NAV, L_PARCEL, lon=lon, lat=lat, distance=40, return_geometry=True,
-                         out_fields="PIN,PIND,BPP,CNCL_DIST")
-    best, best_d, best_pt = None, None, None
+    target_no, street = _addr_parts(geo.get("matched_address") or geo.get("address") or "")
+    feats = ag.query(NAV, L_PARCEL, lon=lon, lat=lat, distance=_SNAP_BUFFER_M, return_geometry=True,
+                     out_fields="PIN,PIND,BPP,CNCL_DIST,TOOLTIP")
+    if not feats:   # point exactly inside a lot but buffer empty (rare) — try a plain intersect
+        feats = ag.query(NAV, L_PARCEL, lon=lon, lat=lat, return_geometry=True,
+                         out_fields="PIN,PIND,BPP,CNCL_DIST,TOOLTIP")
+    cands = []
     for f in feats:
         c = _poly_repr_point(f.get("geometry"))
         if not c:
             continue
-        d = ag.haversine_m(lon, lat, c[0], c[1])
-        if best_d is None or d < best_d:
-            best, best_d, best_pt = f, d, c
-    if best is None:
-        raise LookupError("no LA City parcel within 40 m of the geocoded point (off LA City?)")
-    res = (best["attributes"], best_pt)
+        tip = (f["attributes"].get("TOOLTIP") or "").upper()
+        cands.append({"f": f, "pt": c, "d": ag.haversine_m(lon, lat, c[0], c[1]),
+                      "no": _tooltip_house_no(tip), "same_street": bool(street and street in tip)})
+    if not cands:
+        raise LookupError(f"no LA City parcel within {_SNAP_BUFFER_M} m of the geocoded point (off LA City?)")
+    addr_cands = [x for x in cands if x["same_street"] and x["no"] is not None and target_no is not None]
+    if addr_cands:                                  # address match: closest house number, then distance
+        best = min(addr_cands, key=lambda x: (abs(x["no"] - target_no), x["d"]))
+    else:                                           # fallback: nearest parcel
+        best = min(cands, key=lambda x: x["d"])
+    res = (best["f"]["attributes"], best["pt"])
     _SNAP[key] = res
     return res
 
