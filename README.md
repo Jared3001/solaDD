@@ -10,7 +10,8 @@ canonical/   schema.yaml · taxonomy.yaml · runbook.md · feasibility.md · cdl
 build/       validate.py (drift guard) · generate.py (build master from schema)
              runner.py (read→state→log loop) · collect.py (geocode→all readers→workbook)
 build/sources/  geocoder.py (keystone) + Tier-A readers: fema · hud · tcac · oz ·
-             calfire · calgem · cgs · ust  (each → {answer,notes}; _arcgis.py shared)
+             calfire · calgem · cgs · ust · zimas (LA-City block via NavigateLA REST)
+             (each → {answer,notes}; _arcgis.py shared query helper)
 template/    Checklist_BLANK_master.xlsx  ← the blank; copied per property, never edited
 logs/        scrub_inventory.csv (one-time master cleanup record)
 ```

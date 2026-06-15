@@ -63,8 +63,11 @@ each instance so later spec changes are traceable.
 A **geocoder** (address → census tract + lat/lon) is the keystone. Then:
 - **Tier A (data/API, bypasses the viewer):** HUD QCT/DDA, TCAC Resource Area, OZ,
   FEMA flood (official NFHL REST), CGS fault/liquefaction, CAL FIRE FHSZ, CalGEM wells
-  (REST/data — escapes the unstable viewer), GeoTracker USTs.
-- **Tier B (browser agent, one structured read):** ZIMAS (LA-City block), district lookups.
+  (REST/data — escapes the unstable viewer), GeoTracker/EPA USTs, **and the ZIMAS
+  LA-City block** (NavigateLA + LA-City-Planning ArcGIS REST — ZIMAS's own report API
+  is locked, but the same data is open REST, so no browser is needed).
+- **Tier B (browser agent, one structured read):** residual LA-City fields with no
+  REST layer (transitional height, special grading) and other district lookups.
 - **Tier C (manual):** utility providers, ALUC, coastal, non-LA historic, permits.
 - **External (people produce these):** will-serve, ESA/geotech/ALTA/yield, title, counsel.
 

@@ -11,10 +11,13 @@ Point query returns the polygon at the parcel as JSON — no PDF, no viewer.
 Maps to schema field `flood_zone`: Yes/No cell = inside/outside SFHA;
 zone + panel + effective date go to Notes.
 
-NOTE: layer ids should be confirmed against the live service on first run
-(ArcGIS layer ordering can change); requires outbound HTTPS to hazards.fema.gov.
+NOTE: layer ids confirmed live 2026-06-15 (28=Flood Hazard Zones, 3=FIRM
+Panels); requires outbound HTTPS to hazards.fema.gov. Shares _arcgis.query with
+the other readers (User-Agent + retry — hazards.fema.gov resets bare clients).
 """
-import datetime, json, urllib.parse, urllib.request
+import datetime, json
+
+import _arcgis as ag
 
 NFHL = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer"
 LAYER_FLOOD, LAYER_PANEL = 28, 3   # confirmed live 2026-06-15: 28=Flood Hazard Zones, 3=FIRM Panels
@@ -30,28 +33,14 @@ def _fmt_eff_date(v):
         return str(v)
 
 
-def _point_query(layer: int, lon: float, lat: float, out_fields: str, timeout: int = 30) -> list:
-    params = {
-        "geometry": f"{lon},{lat}", "geometryType": "esriGeometryPoint", "inSR": "4326",
-        "spatialRel": "esriSpatialRelIntersects", "outFields": out_fields,
-        "returnGeometry": "false", "f": "json",
-    }
-    url = f"{NFHL}/{layer}/query?{urllib.parse.urlencode(params)}"
-    with urllib.request.urlopen(url, timeout=timeout) as r:
-        data = json.load(r)
-    if "error" in data:
-        raise RuntimeError(f"NFHL layer {layer} error: {data['error']}")
-    return data.get("features", [])
-
-
 def flood_zone(lon: float, lat: float) -> dict:
     """Returns answer for the flood_zone cell + a Notes string."""
-    feats = _point_query(LAYER_FLOOD, lon, lat, "FLD_ZONE,SFHA_TF,ZONE_SUBTY")
+    feats = ag.query(NFHL, LAYER_FLOOD, lon=lon, lat=lat, out_fields="FLD_ZONE,SFHA_TF,ZONE_SUBTY")
     if not feats:
         return {"answer": "No", "notes": "Zone X — outside SFHA (no flood-hazard polygon at parcel). Source: FEMA NFHL REST."}
     a = feats[0]["attributes"]
     in_sfha = a.get("SFHA_TF") == "T"
-    panel = _point_query(LAYER_PANEL, lon, lat, "FIRM_PAN,EFF_DATE")
+    panel = ag.query(NFHL, LAYER_PANEL, lon=lon, lat=lat, out_fields="FIRM_PAN,EFF_DATE")
     pa = panel[0]["attributes"] if panel else {}
     note = (f"Zone {a.get('FLD_ZONE')}"
             + (f" ({a.get('ZONE_SUBTY')})" if a.get("ZONE_SUBTY") else "")

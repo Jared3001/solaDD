@@ -25,9 +25,10 @@ sys.path.insert(0, str(ROOT / "build" / "sources"))
 import yaml
 from runner import run_field
 from geocoder import geocode
-import fema, hud, tcac, oz, calfire, calgem, cgs, ust
+import fema, hud, tcac, oz, calfire, calgem, cgs, ust, zimas
 
 # field id -> reader callable(geo) -> {"answer","notes"} (or raises -> TOOL-FAIL)
+# Statewide / federal sources — run for any CA parcel.
 READERS = {
     "qct": hud.qct,
     "dda": hud.dda,
@@ -41,6 +42,19 @@ READERS = {
     "underground_storage_tanks": ust.underground_storage_tanks,
 }
 
+# LA-City zoning/hazard block (ZIMAS-equivalent) — only run when the parcel is
+# in LA City; off LA City these route to local planning and stay manual.
+ZIMAS_READERS = {
+    "zoning": zimas.zoning,
+    "q_conditions_la": zimas.q_conditions,
+    "specific_plan_overlay": zimas.specific_plan_overlay,
+    "council_supervisor_district": zimas.council_district,
+    "historic_status": zimas.historic_status,
+    "methane_hazard_zone_la": zimas.methane_hazard_zone,
+    "toc_tier_la": zimas.toc_tier,
+    "half_mile_major_transit": zimas.half_mile_major_transit,
+}
+
 
 def collect(wb_path, address, property_id=None):
     schema = yaml.safe_load((ROOT / "canonical/schema.yaml").read_text())
@@ -48,8 +62,14 @@ def collect(wb_path, address, property_id=None):
     geo = geocode(address)
     print(f"geocoded: {geo['matched_address']}  tract {geo['geoid']}  "
           f"({geo['lat']:.5f},{geo['lon']:.5f})\n")
+    active = dict(READERS)
+    if zimas.in_la_city(geo):
+        active.update(ZIMAS_READERS)
+        print("parcel is in LA City -> running ZIMAS block\n")
+    else:
+        print("parcel not in LA City -> ZIMAS block skipped (route to local planning)\n")
     results = {}
-    for fid, fn in READERS.items():
+    for fid, fn in active.items():
         field = by_id[fid]
         state = run_field(wb_path, field, (lambda fn=fn: fn(geo)),
                           property_id=property_id or "DEMO")

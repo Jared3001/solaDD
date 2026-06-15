@@ -49,7 +49,7 @@ for sub-parcel precision; for a parcel that straddles a zone boundary, fall back
 | CAL FIRE FHSZ | very_high_fire_hazard_zone | A/B | ArcGIS REST / county data | TOOL-FAIL → JUDGMENT* |
 | OZ (Novogradac/HUD) | opportunity_zone | A | published OZ tract list | TOOL-FAIL |
 | GeoTracker | underground_storage_tanks | A/B | bulk download or runReport-by-address | TOOL-FAIL |
-| ZIMAS | LA-City zoning/hazard/TOC block | B | Claude-in-Chrome, one get_page_text | TOOL-FAIL |
+| ZIMAS | LA-City zoning/hazard/TOC block | A | NavigateLA + LA-City-Planning ArcGIS REST by point (no browser) | TOOL-FAIL |
 | District lookups | council_supervisor_district, school district | B | local/Census district REST | TOOL-FAIL |
 | Utility service areas | power/sewer/water provider | C | jurisdiction-specific, no uniform API | MANUAL-VERIFY |
 | ALUC / Coastal / local historic | airport, coastal_zone, historic (non-LA) | C | heterogeneous layers | MANUAL-VERIFY |
@@ -107,13 +107,18 @@ always do the lookup; it's now free given the geocoder.
 runReport-by-address URL returns a parseable report. Either works; bulk + spatial proximity is the
 more robust automated path.
 
-## Tier B — browser-agent automatable (interactive, one structured read)
+**ZIMAS (LA City only) — RECLASSIFIED to Tier A (2026-06-15).** ZIMAS's own parcel-report API is
+WAF-locked, but the same data is published as open, no-auth ArcGIS REST layers, so no browser pass is
+needed. `build/sources/zimas.py` snaps the geocoded point to the parcel (NavigateLA layer 395, 40 m
+buffer fallback) and point-queries: **NavigateLA** for zoning (71 `ZONE_CMPLT`, incl. `[Q]` prefix),
+specific plan (93), HPOZ (75) + Historic-Cultural Monuments (74), methane MZ/MB (354), council district
+(parcel `CNCL_DIST`); **LA City Planning AGOL** for TOC tier (`tier`) and ½-mile major transit (AB2097).
+Two fields have **no public REST layer** anywhere found — `transitional_height_adj_zones` and
+`special_grading_area_la` — and stay manual (ZIMAS derives them in its locked backend). Most hazard
+fields also have statewide Tier-A sources (FEMA, CGS, CAL FIRE, CalGEM); ZIMAS is the LA-City block
+**plus a cross-check**, not sole authority (its TCAC field is known to lag).
 
-**ZIMAS (LA City only).** For an LA-City parcel, one Claude-in-Chrome pass (search → expand the three
-panels → `get_page_text`) returns the entire zoning + hazard + TOC/ED-1 block. It's the efficient
-LA-City convenience path — but note most of those hazard fields *also* have statewide Tier-A sources
-(FEMA, CGS, CAL FIRE, CalGEM), so ZIMAS is best used as the LA-City one-shot **plus a cross-check**,
-not the sole authority (its TCAC field is known to lag).
+## Tier B — browser-agent automatable (interactive, one structured read)
 
 **District lookups.** Council/supervisor and school district often have a REST/lookup endpoint
 (Census or local). Borderline A/B; low risk.
