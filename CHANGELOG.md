@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.7-draft (2026-06-15)
+- pha automated (pha.py, now 24 readers): resolves the governing Public Housing
+  Authority from incorporated city + county against HUD's authoritative Public
+  Housing Authorities point layer — city PHA when a PHA's formal name contains the
+  city and not "County" (e.g. Housing Authority of the City of Santa Monica), else
+  the county authority (name contains "County", e.g. LA County Development
+  Authority). Generalizes statewide; verified LA City->HACLA, Santa Monica,
+  Pasadena, San Diego->SD Housing Commission, unincorporated->HACoLA. HUD's
+  service-area POLYGON layer is avoided (HUD-flagged proposed/experimental; its
+  polygons overlap — every LA point falsely hits Baldwin Park).
+- geocoder now returns `place` (incorporated city, suffix-stripped) from the
+  Census 'Incorporated Places' geography; None for unincorporated areas.
+
 ## v0.6-draft (2026-06-15)
 - 4 more fields automated (now 23 readers): county, geographic_pool, land_sf,
   neighborhood_change_area.

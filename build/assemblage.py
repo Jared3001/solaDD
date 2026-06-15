@@ -86,14 +86,14 @@ def parcel_info(apn: str) -> dict:
     return {"apn": apn, "bpp": bpp, "n_lots": len(feet), "land_sf": round(land_sf, 1),
             "lon": lon, "lat": lat, "geoid": geo["geoid"],
             "state_fips": geo["state_fips"], "county_fips": geo["county_fips"],
-            "matched_address": geo["matched_address"]}
+            "place": geo.get("place"), "matched_address": geo["matched_address"]}
 
 
 def _run_readers(parcel):
     """Run every reader for one parcel; return {fid: {'answer','state','error'}}."""
     geo = {"lon": parcel["lon"], "lat": parcel["lat"], "geoid": parcel["geoid"],
            "state_fips": parcel["state_fips"], "county_fips": parcel["county_fips"],
-           "matched_address": parcel["matched_address"]}
+           "place": parcel.get("place"), "matched_address": parcel["matched_address"]}
     out = {}
     for fid, fn in {**READERS, **ZIMAS_READERS}.items():
         if fid == "land_sf":   # assemblage writes COMBINED land_sf itself

@@ -36,6 +36,19 @@ def _get_json(url, timeout=30, tries=3):
     raise RuntimeError(f"census geocoder failed after {tries} tries: {last}")
 
 
+def _place(geographies):
+    """Incorporated city name (suffix stripped), or None if unincorporated."""
+    ip = geographies.get("Incorporated Places", [])
+    if not ip:
+        return None
+    name = ip[0].get("NAME", "")
+    for suf in (" city", " town", " village", " CDP"):
+        if name.endswith(suf):
+            name = name[: -len(suf)]
+            break
+    return name or None
+
+
 def geocode(address: str, timeout: int = 30) -> dict:
     q = urllib.parse.urlencode(
         {"address": address, "benchmark": BENCHMARK, "vintage": VINTAGE, "format": "json"}
@@ -52,6 +65,7 @@ def geocode(address: str, timeout: int = 30) -> dict:
         "lat": c["y"], "lon": c["x"],
         "state_fips": t["STATE"], "county_fips": t["COUNTY"],
         "tract": t["TRACT"], "geoid": t["GEOID"],          # 11-digit tract id for HUD/TCAC/OZ lookups
+        "place": _place(m["geographies"]),                 # incorporated city (None = unincorporated)
     }
 
 
@@ -62,7 +76,8 @@ def geocode_point(lon: float, lat: float, timeout: int = 30) -> dict:
         {"x": lon, "y": lat, "benchmark": BENCHMARK, "vintage": VINTAGE, "format": "json"}
     )
     data = _get_json(f"{COORD}?{q}", timeout)
-    tracts = data.get("result", {}).get("geographies", {}).get("Census Tracts", [])
+    geos = data.get("result", {}).get("geographies", {})
+    tracts = geos.get("Census Tracts", [])
     if not tracts:
         raise LookupError(f"no census tract for point ({lat},{lon})")
     t = tracts[0]
@@ -71,6 +86,7 @@ def geocode_point(lon: float, lat: float, timeout: int = 30) -> dict:
         "lat": lat, "lon": lon,
         "state_fips": t["STATE"], "county_fips": t["COUNTY"],
         "tract": t["TRACT"], "geoid": t["GEOID"],
+        "place": _place(geos),
     }
 
 

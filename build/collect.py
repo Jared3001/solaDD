@@ -25,13 +25,14 @@ sys.path.insert(0, str(ROOT / "build" / "sources"))
 import yaml
 from runner import run_field
 from geocoder import geocode
-import fema, hud, tcac, oz, calfire, calgem, cgs, ust, zimas, jurisdiction, parcel, nc
+import fema, hud, tcac, oz, calfire, calgem, cgs, ust, zimas, jurisdiction, parcel, nc, pha
 
 # field id -> reader callable(geo) -> {"answer","notes"} (or raises -> TOOL-FAIL)
 # Statewide / federal / derived sources — run for any CA parcel.
 READERS = {
     "county": jurisdiction.county,
     "geographic_pool": jurisdiction.geographic_pool,
+    "pha": pha.pha,
     "land_sf": parcel.land_sf,
     "qct": hud.qct,
     "dda": hud.dda,
