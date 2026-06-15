@@ -15,6 +15,7 @@ boundary, fall back to the map.
 import json, urllib.parse, urllib.request
 
 BASE = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
+COORD = "https://geocoding.geo.census.gov/geocoder/geographies/coordinates"
 BENCHMARK, VINTAGE = "Public_AR_Current", "Current_Current"
 
 
@@ -35,6 +36,26 @@ def geocode(address: str, timeout: int = 30) -> dict:
         "lat": c["y"], "lon": c["x"],
         "state_fips": t["STATE"], "county_fips": t["COUNTY"],
         "tract": t["TRACT"], "geoid": t["GEOID"],          # 11-digit tract id for HUD/TCAC/OZ lookups
+    }
+
+
+def geocode_point(lon: float, lat: float, timeout: int = 30) -> dict:
+    """Reverse the keystone: lon/lat -> census tract (for parcels resolved by APN,
+    which have a centroid but no address). Same shape as geocode()."""
+    q = urllib.parse.urlencode(
+        {"x": lon, "y": lat, "benchmark": BENCHMARK, "vintage": VINTAGE, "format": "json"}
+    )
+    with urllib.request.urlopen(f"{COORD}?{q}", timeout=timeout) as r:
+        data = json.load(r)
+    tracts = data.get("result", {}).get("geographies", {}).get("Census Tracts", [])
+    if not tracts:
+        raise LookupError(f"no census tract for point ({lat},{lon})")
+    t = tracts[0]
+    return {
+        "matched_address": f"({lat:.6f},{lon:.6f})",
+        "lat": lat, "lon": lon,
+        "state_fips": t["STATE"], "county_fips": t["COUNTY"],
+        "tract": t["TRACT"], "geoid": t["GEOID"],
     }
 
 

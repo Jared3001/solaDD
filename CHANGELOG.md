@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.5-draft (2026-06-15)
+- build/assemblage.py: multi-APN block-assemblage support. Sizes the combined
+  site (LA City Parcels layer 5 geometry in EPSG:2229 — reproduces ZIMAS lot
+  area; sums multi-lot APNs) and runs every reader per parcel, aggregating to a
+  site-level answer: yes/no hazards -> Yes if ANY parcel (names APNs); text/enum
+  -> shared value or "MIXED: v (apns); …". A JUDGMENT on any parcel makes the
+  site field JUDGMENT. Surfaces mixed zoning, partial historic status, tract
+  splits — the things a single-parcel read misses.
+- geocoder.geocode_point(lon,lat): reverse the keystone (point -> census tract)
+  so APN-resolved parcels (centroid, no address) can run the tract-keyed readers.
+- Note: one APN can span multiple lot polygons (e.g. 4201 Pico anchor = 2 lots,
+  8,547 sf) where ZIMAS shows only one — assemblage sums them and reports per-APN.
+
 ## v0.4-draft (2026-06-15)
 - transitional_height_adj_zones (C46) automated as a DERIVED reader: no layer
   exists, so it's computed from zoning adjacency (LAMC 12.21.1-A.10) on

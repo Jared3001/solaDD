@@ -9,6 +9,7 @@ sync with the schema is the failure this repo exists to prevent.
 canonical/   schema.yaml · taxonomy.yaml · runbook.md · feasibility.md · cdlac_regions.csv
 build/       validate.py (drift guard) · generate.py (build master from schema)
              runner.py (read→state→log loop) · collect.py (geocode→all readers→workbook)
+             assemblage.py (multi-APN block: combined land area + aggregated designations)
 build/sources/  geocoder.py (keystone) + Tier-A readers: fema · hud · tcac · oz ·
              calfire · calgem · cgs · ust · zimas (LA-City block via NavigateLA REST)
              (each → {answer,notes}; _arcgis.py shared query helper)
