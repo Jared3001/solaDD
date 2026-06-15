@@ -11,10 +11,44 @@ Reports GROSS; buildable (setbacks/slope) and ALTA reconciliation stay manual pe
 the schema guardrail. Lands VERIFIED.
 """
 import _arcgis as ag
+import re
+
 import zimas
 
 LACITY = "https://maps.lacity.org/lahub/rest/services/Landbase_Information/MapServer"
 LACOUNTY = "https://public.gis.lacounty.gov/public/rest/services/LACounty_Cache/LACounty_Parcel/MapServer"
+
+
+def _county_snap(geo):
+    """Pick the LA County parcel by ADDRESS (same street + closest house number,
+    from the layer's structured Situs fields), else nearest by parcel centroid.
+    Returns (AIN, matched) where matched=True means an address match (high
+    confidence) vs a nearest-parcel fallback. (AIN, None) -> nothing found."""
+    lon, lat = geo["lon"], geo["lat"]
+    target_no, street = zimas._addr_parts(geo.get("matched_address") or geo.get("address") or "")
+    feats = ag.query(LACOUNTY, 0, lon=lon, lat=lat, distance=150, return_geometry=False,
+                     out_fields="AIN,SitusHouseNo,SitusStreet,CENTER_LON,CENTER_LAT")
+    rows = []
+    for f in feats:
+        a = f["attributes"]
+        digits = re.sub(r"\D", "", a.get("SitusHouseNo") or "")
+        hn = int(digits) if digits else None
+        clon, clat = a.get("CENTER_LON"), a.get("CENTER_LAT")
+        d = ag.haversine_m(lon, lat, clon, clat) if (clon and clat) else float("inf")
+        rows.append({"ain": a.get("AIN"), "hn": hn, "d": d,
+                     "street_match": bool(street and street in (a.get("SitusStreet") or "").upper())})
+    if not rows:
+        return None, None
+    addr = [r for r in rows if r["street_match"] and r["hn"] is not None and target_no is not None]
+    if addr:
+        return min(addr, key=lambda r: (abs(r["hn"] - target_no), r["d"]))["ain"], True
+    return min(rows, key=lambda r: r["d"])["ain"], False
+
+
+def _county_area_sf(ain):
+    """Gross area (sq ft) of an AIN's parcel polygon, from geometry in EPSG:2229."""
+    af = ag.query(LACOUNTY, 0, where=f"AIN='{ain}'", return_geometry=True, out_sr=2229, out_fields="AIN")
+    return sum(ag.ring_area(f["geometry"]["rings"]) for f in af if f.get("geometry"))
 
 
 def land_sf(geo) -> dict:
@@ -31,31 +65,14 @@ def land_sf(geo) -> dict:
                     "notes": f"Gross land area {sf:,.0f} sf from LA City Parcels geometry (APN {apn}{extra}). "
                              f"GROSS — capture buildable separately (setbacks/slope); reconcile vs ALTA survey. "
                              f"Source: LA City Parcels."}
-    lon, lat = geo["lon"], geo["lat"]
-    # Select the parcel in lon/lat (point-in-parcel, else nearest within 40 m), then
-    # read that AIN's polygon in EPSG:2229 (ft) for area.
-    sel = ag.query(LACOUNTY, 0, lon=lon, lat=lat, return_geometry=True, out_sr=4326, out_fields="AIN")
-    exact = bool([f for f in sel if f.get("geometry")])
-    if not exact:
-        sel = ag.query(LACOUNTY, 0, lon=lon, lat=lat, distance=40, return_geometry=True, out_sr=4326, out_fields="AIN")
-    best, best_d = None, None
-    for f in sel:
-        rings = (f.get("geometry") or {}).get("rings") or []
-        if not rings:
-            continue
-        pts = rings[0]
-        cx, cy = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
-        d = ag.haversine_m(lon, lat, cx, cy)
-        if best_d is None or d < best_d:
-            best, best_d = f, d
-    if best is None:
-        raise LookupError("no LA City/County parcel polygon at/near the geocoded point for land area")
-    ain = best["attributes"].get("AIN")
-    af = ag.query(LACOUNTY, 0, where=f"AIN='{ain}'", return_geometry=True, out_sr=2229, out_fields="AIN")
-    sf = sum(ag.ring_area(f["geometry"]["rings"]) for f in af if f.get("geometry"))
-    flag = "" if exact else " (nearest parcel to geocoded point — VERIFY APN)"
-    return {"answer": round(sf), "state": "VERIFIED" if exact else "JUDGMENT",
-            "notes": f"Gross land area {sf:,.0f} sf from LA County parcel geometry (AIN {ain}){flag}. "
+    ain, matched = _county_snap(geo)
+    if not ain:
+        raise LookupError("no LA City/County parcel at/near the geocoded point for land area")
+    sf = _county_area_sf(ain)
+    flag = "" if matched else " (nearest parcel to geocoded point — VERIFY APN)"
+    apn = f"{ain[:4]}-{ain[4:7]}-{ain[7:]}" if ain and len(ain) == 10 else ain
+    return {"answer": round(sf), "state": "VERIFIED" if matched else "JUDGMENT",
+            "notes": f"Gross land area {sf:,.0f} sf from LA County parcel geometry (APN {apn}){flag}. "
                      f"GROSS — reconcile buildable vs ALTA survey. Source: LA County Assessor parcels."}
 
 
