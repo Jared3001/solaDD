@@ -53,6 +53,7 @@ ZIMAS_READERS = {
     "methane_hazard_zone_la": zimas.methane_hazard_zone,
     "toc_tier_la": zimas.toc_tier,
     "half_mile_major_transit": zimas.half_mile_major_transit,
+    "transitional_height_adj_zones": zimas.transitional_height,   # derived -> JUDGMENT
 }
 
 

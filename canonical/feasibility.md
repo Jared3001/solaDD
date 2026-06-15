@@ -113,10 +113,15 @@ needed. `build/sources/zimas.py` snaps the geocoded point to the parcel (Navigat
 buffer fallback) and point-queries: **NavigateLA** for zoning (71 `ZONE_CMPLT`, incl. `[Q]` prefix),
 specific plan (93), HPOZ (75) + Historic-Cultural Monuments (74), methane MZ/MB (354), council district
 (parcel `CNCL_DIST`); **LA City Planning AGOL** for TOC tier (`tier`) and ½-mile major transit (AB2097).
-Two fields have **no public REST layer** anywhere found — `transitional_height_adj_zones` and
-`special_grading_area_la` — and stay manual (ZIMAS derives them in its locked backend). Most hazard
-fields also have statewide Tier-A sources (FEMA, CGS, CAL FIRE, CalGEM); ZIMAS is the LA-City block
-**plus a cross-check**, not sole authority (its TCAC field is known to lag).
+Two fields have **no public REST layer** anywhere found. `transitional_height_adj_zones`
+(LAMC 12.21.1-A.10) is now **DERIVED** from zoning adjacency on layer 71 (subject C/M lot + an
+RW1-or-more-restrictive zone within 49/99/199 ft → 25/33/61 ft cap) and lands as **JUDGMENT** —
+an estimate from generalized polygons measured at the parcel centroid, routed up, never VERIFIED;
+non-C/M parcels resolve NA. `special_grading_area_la` (BOE Basic Grid Map A-13372) has no layer and
+is not derivable — it lives only in ZIMAS's locked parcel DB, so it stays manual unless scraped from
+the ZIMAS report by APN (browser). Most hazard fields also have statewide Tier-A sources (FEMA, CGS,
+CAL FIRE, CalGEM); ZIMAS is the LA-City block **plus a cross-check**, not sole authority (its TCAC
+field is known to lag).
 
 ## Tier B — browser-agent automatable (interactive, one structured read)
 

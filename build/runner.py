@@ -18,6 +18,12 @@ from openpyxl import load_workbook
 
 MAX_ATTEMPTS = 3   # mirrors taxonomy.yaml escalation.max_attempts
 
+# Close/landing states a reader may request via {"state": ...} on success.
+# Default is VERIFIED (primary-source confirmed). JUDGMENT lets a reader that
+# can only DERIVE a borderline answer (e.g. transitional height) route it up for
+# senior review instead of overclaiming VERIFIED. NA for "rule does not apply".
+READER_LANDING_STATES = {"VERIFIED", "JUDGMENT", "NA", "COMPUTED", "OM-SOURCED"}
+
 
 def _attempt_count(token) -> int:
     if isinstance(token, str) and token.startswith("TOOL-FAIL"):
@@ -43,7 +49,10 @@ def run_field(wb_path, field: dict, reader, *, property_id=None, max_attempts=MA
         if out.get("notes"):
             prev = ws.cell(row, 5).value
             ws.cell(row, 5, (prev + " | " if prev else "") + out["notes"])
-        status.value = "VERIFIED"
+        landing = out.get("state", "VERIFIED")
+        if landing not in READER_LANDING_STATES:
+            landing = "VERIFIED"
+        status.value = landing
         log.append([ts, pid, field["id"], tool, "success", n + 1, ""])
     except Exception as e:
         n += 1
@@ -77,6 +86,13 @@ def _selftest():
     seq.append(run_field(tmp, flood, succeeding, property_id="TEST"))
     print("escalation sequence:", seq)
     assert seq == ["TOOL-FAIL 1/3", "TOOL-FAIL 2/3", "MANUAL-VERIFY", "VERIFIED"], seq
+
+    def deriving():   # a reader that can only derive a borderline answer
+        return {"answer": "Likely applies", "notes": "derived", "state": "JUDGMENT"}
+
+    judged = run_field(tmp, flood, deriving, property_id="TEST")
+    print("reader-requested landing state:", judged)
+    assert judged == "JUDGMENT", judged
 
     from openpyxl import load_workbook
     log = load_workbook(tmp)["State Log"]

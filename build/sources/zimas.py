@@ -168,6 +168,51 @@ def toc_tier(geo) -> dict:
     return {"answer": f"Tier {tier}", "notes": f"TOC Tier {tier}. Source: LA City Planning TOC (2024)."}
 
 
+# Transitional height (LAMC 12.21.1-A.10): no published layer exists — DERIVED
+# from zoning adjacency. Applies to a C/M lot within set distances of an RW1-or-
+# more-restrictive zone, capping height 25/33/61 ft over the 0-49/50-99/100-199 ft
+# bands. We approximate by buffering the parcel's representative point, so the
+# result is a JUDGMENT candidate flag (route up), never VERIFIED.
+TH_BANDS = [(14.9, "0–49 ft", 25), (30.2, "50–99 ft", 33), (60.7, "100–199 ft", 61)]
+_RESTRICTIVE = ("A1", "A2", "RA", "RE", "RS", "R1", "RU", "RZ", "RW1")  # "RW1 or more restrictive"
+
+
+def _restrictive(zone_class) -> bool:
+    zc = (zone_class or "").upper()
+    return zc.startswith(_RESTRICTIVE) and not zc.startswith("RAS")   # RAS3/RAS4 are denser, not restrictive
+
+
+def transitional_height(geo) -> dict:
+    _, (lon, lat) = _snapped(geo)
+    feats = ag.query(NAV, L_ZONE, lon=lon, lat=lat, out_fields="ZONE_CMPLT,ZONE_CLASS")
+    if not feats:
+        raise LookupError("no LA City zoning polygon at parcel")
+    a = feats[0]["attributes"]
+    zc, zcmplt = (a.get("ZONE_CLASS") or "").upper(), a.get("ZONE_CMPLT")
+    if not (zc.startswith("C") or zc.startswith("M")):
+        return {"answer": "N/A — applies only to C/M zones", "state": "NA",
+                "notes": f"Transitional height (LAMC 12.21.1-A.10) applies only to commercial/industrial "
+                         f"zones; subject is {zcmplt}. Source: derived from ZIMAS zoning (NavigateLA 71)."}
+    caveat = ("DERIVED ESTIMATE — distances measured from the parcel centroid on generalized zoning "
+              "polygons; the rule governs portions of the lot measured from the lot line and a grade "
+              "exception can raise the cap. Confirm in ZIMAS/LADBS.")
+    hit = None
+    for radius, band, cap in TH_BANDS:
+        near = ag.query(NAV, L_ZONE, lon=lon, lat=lat, distance=radius, out_fields="ZONE_CLASS")
+        if any(_restrictive(f["attributes"].get("ZONE_CLASS")) for f in near):
+            hit = (band, cap)
+            break
+    if hit:
+        band, cap = hit
+        return {"answer": f"Likely applies — ~{cap} ft cap ({band} from a more-restrictive zone)",
+                "state": "JUDGMENT",
+                "notes": f"Subject {zcmplt}; a more-restrictive (RW1-or-tighter) zone lies within {band}. "
+                         f"Near-portion cap ≈ {cap} ft. {caveat} Source: derived from ZIMAS zoning (NavigateLA 71)."}
+    return {"answer": "Does not appear to apply", "state": "JUDGMENT",
+            "notes": f"Subject {zcmplt} (C/M); no more-restrictive zone within ~200 ft of the parcel centroid. "
+                     f"{caveat} Source: derived from ZIMAS zoning (NavigateLA 71)."}
+
+
 def half_mile_major_transit(geo) -> dict:
     _, (lon, lat) = _snapped(geo)
     feats = ag.query(AB2097, L_AB2097, lon=lon, lat=lat, out_fields="OBJECTID")
@@ -190,7 +235,8 @@ if __name__ == "__main__":
                     "specific_plan_overlay": specific_plan_overlay,
                     "council_supervisor_district": council_district,
                     "historic_status": historic_status, "methane_hazard_zone_la": methane_hazard_zone,
-                    "toc_tier_la": toc_tier, "half_mile_major_transit": half_mile_major_transit}.items():
+                    "toc_tier_la": toc_tier, "half_mile_major_transit": half_mile_major_transit,
+                    "transitional_height_adj_zones": transitional_height}.items():
         try:
             out[fid] = fn(g)
         except Exception as e:

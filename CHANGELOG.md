@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4-draft (2026-06-15)
+- transitional_height_adj_zones (C46) automated as a DERIVED reader: no layer
+  exists, so it's computed from zoning adjacency (LAMC 12.21.1-A.10) on
+  NavigateLA layer 71 — C/M subject + RW1-or-more-restrictive zone within
+  49/99/199 ft → 25/33/61 ft cap. Lands JUDGMENT (estimate, route up); non-C/M
+  parcels resolve NA.
+- runner.run_field now honors an optional reader-returned `state` (validated
+  against READER_LANDING_STATES, default VERIFIED) so a derive-only reader can
+  land JUDGMENT/NA instead of overclaiming VERIFIED; selftest covers it.
+- special_grading_area_la (C56) confirmed NOT automatable without a browser:
+  exhaustive search found no REST layer (NavigateLA 352 "Hillside Grading Area"
+  is a different dataset); value lives only in ZIMAS's locked parcel DB.
+
 ## v0.3-draft (2026-06-15)
 - ZIMAS reclassified Tier-B -> Tier-A: build/sources/zimas.py reads the LA-City
   zoning/hazard block via open ArcGIS REST (NavigateLA + LA City Planning AGOL),
