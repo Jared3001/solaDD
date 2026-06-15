@@ -66,6 +66,19 @@ def haversine_m(lon1, lat1, lon2, lat2):
     return 2 * R * math.asin(math.sqrt(a))
 
 
+def ring_area(rings):
+    """|shoelace area| of an ArcGIS polygon's rings. Coordinates MUST be in a
+    projected SR (e.g. EPSG:2229 US ft) for the result to be a real area — lon/lat
+    degrees will not give a meaningful value."""
+    total = 0.0
+    for ring in rings or []:
+        s = 0.0
+        for i in range(len(ring) - 1):
+            s += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1]
+        total += s / 2.0
+    return abs(total)
+
+
 def nearest(features, lon, lat):
     """Return (feature, distance_m) for the nearest point feature (needs geometry).
 

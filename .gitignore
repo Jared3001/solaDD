@@ -4,3 +4,4 @@ template/*_generated.xlsx
 properties/
 .venv/
 build/_*.xlsx
+build/sources/_cache/

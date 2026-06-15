@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.6-draft (2026-06-15)
+- 4 more fields automated (now 23 readers): county, geographic_pool, land_sf,
+  neighborhood_change_area.
+  - jurisdiction.py: county (from geocoder county FIPS, CA map) and
+    geographic_pool (CDLAC region via canonical/cdlac_regions.csv + LA city-limits
+    special case: City of LA vs Balance of LA County). Verified across City of LA,
+    Balance of LA County (Santa Monica), and Coastal Region (San Diego).
+  - parcel.py: land_sf = gross land area. LA City via LA City Parcels geometry
+    (EPSG:2229, sums an APN's lots = ZIMAS lot area); non-LA-City LA County via
+    the Assessor parcel polygon (point, else nearest-within-40m -> JUDGMENT/verify).
+  - nc.py: neighborhood_change_area from the CTCAC/HCD AFFH statewide GeoJSON
+    (field nbrhood_chng by tract fips; 1=Yes). Not a query API — downloaded once
+    and cached to _cache/ as a slim {fips:flag} map. URL carries a per-vintage
+    asset path (update on new releases).
+- _arcgis.ring_area (shoelace) shared; assemblage writes COMBINED land_sf and
+  aggregates the new derived fields across parcels.
+
 ## v0.5-draft (2026-06-15)
 - build/assemblage.py: multi-APN block-assemblage support. Sizes the combined
   site (LA City Parcels layer 5 geometry in EPSG:2229 — reproduces ZIMAS lot

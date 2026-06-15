@@ -85,15 +85,19 @@ def parcel_info(apn: str) -> dict:
     geo = geocode_point(lon, lat)
     return {"apn": apn, "bpp": bpp, "n_lots": len(feet), "land_sf": round(land_sf, 1),
             "lon": lon, "lat": lat, "geoid": geo["geoid"],
+            "state_fips": geo["state_fips"], "county_fips": geo["county_fips"],
             "matched_address": geo["matched_address"]}
 
 
 def _run_readers(parcel):
     """Run every reader for one parcel; return {fid: {'answer','state','error'}}."""
     geo = {"lon": parcel["lon"], "lat": parcel["lat"], "geoid": parcel["geoid"],
+           "state_fips": parcel["state_fips"], "county_fips": parcel["county_fips"],
            "matched_address": parcel["matched_address"]}
     out = {}
     for fid, fn in {**READERS, **ZIMAS_READERS}.items():
+        if fid == "land_sf":   # assemblage writes COMBINED land_sf itself
+            continue
         try:
             r = fn(geo)
             out[fid] = {"answer": r.get("answer"), "state": r.get("state", "VERIFIED")}
@@ -185,7 +189,7 @@ def assess(wb_path, apns, property_id=None):
     print("-" * 100)
     agg = {}
     for fid in [*READERS, *ZIMAS_READERS]:
-        if fid not in by_id:
+        if fid not in by_id or fid == "land_sf":   # land_sf written as combined above
             continue
         a = _aggregate(fid, atype.get(fid), per)
         agg[fid] = a
