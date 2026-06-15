@@ -8,6 +8,9 @@ sync with the schema is the failure this repo exists to prevent.
 ```
 canonical/   schema.yaml · taxonomy.yaml · runbook.md · feasibility.md · cdlac_regions.csv
 build/       validate.py (drift guard) · generate.py (build master from schema)
+             runner.py (read→state→log loop) · collect.py (geocode→all readers→workbook)
+build/sources/  geocoder.py (keystone) + Tier-A readers: fema · hud · tcac · oz ·
+             calfire · calgem · cgs · ust  (each → {answer,notes}; _arcgis.py shared)
 template/    Checklist_BLANK_master.xlsx  ← the blank; copied per property, never edited
 logs/        scrub_inventory.csv (one-time master cleanup record)
 ```
