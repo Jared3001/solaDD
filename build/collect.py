@@ -26,10 +26,14 @@ import yaml
 from runner import run_field
 from geocoder import geocode
 import fema, hud, tcac, oz, calfire, calgem, cgs, ust, zimas, jurisdiction, parcel, nc, pha
+import places, slope, towers, airport, coastal
 
 # field id -> reader callable(geo) -> {"answer","notes"} (or raises -> TOOL-FAIL)
 # Statewide / federal / derived sources — run for any CA parcel.
 READERS = {
+    "address": jurisdiction.address,
+    "apn": jurisdiction.apn,
+    "city_jurisdiction": jurisdiction.city_jurisdiction,
     "county": jurisdiction.county,
     "geographic_pool": jurisdiction.geographic_pool,
     "pha": pha.pha,
@@ -41,10 +45,23 @@ READERS = {
     "opportunity_zone": oz.opportunity_zone,
     "flood_zone": lambda geo: fema.flood_zone(geo["lon"], geo["lat"]),
     "very_high_fire_hazard_zone": calfire.very_high_fire_hazard_zone,
+    "airport_hazard_zone": airport.airport_hazard_zone,
+    "coastal_zone": coastal.coastal_zone,
     "wells_on_site": calgem.wells_on_site,
     "liquefaction_zone": cgs.liquefaction_zone,
     "alquist_priolo_fault_zone": cgs.alquist_priolo_fault_zone,
     "underground_storage_tanks": ust.underground_storage_tanks,
+    "slope_grade": slope.slope_grade,
+    "cell_towers": towers.cell_towers,
+    # proximity (OpenStreetMap)
+    "nearest_bus_stop": places.nearest_bus_stop,
+    "nearest_grocery_store": places.nearest_grocery_store,
+    "nearest_park": places.nearest_park,
+    "nearest_medical_clinic": places.nearest_medical_clinic,
+    "nearest_library": places.nearest_library,
+    "nearest_pharmacy": places.nearest_pharmacy,
+    "nearest_school": places.nearest_school,
+    "nearest_qualifying_transit_stop": places.nearest_qualifying_transit_stop,
 }
 
 # LA-City zoning/hazard block (ZIMAS-equivalent) — only run when the parcel is
@@ -59,6 +76,7 @@ ZIMAS_READERS = {
     "toc_tier_la": zimas.toc_tier,
     "half_mile_major_transit": zimas.half_mile_major_transit,
     "transitional_height_adj_zones": zimas.transitional_height,   # derived -> JUDGMENT
+    "tier_transit_verification": zimas.tier_transit_verification,
 }
 
 

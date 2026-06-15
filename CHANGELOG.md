@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.8-draft (2026-06-15)
+- 16 more fields automated (~40 readers total):
+  - 3 "free wins" (jurisdiction.py): address, apn, city_jurisdiction (the schema's
+    Phase-1 driver) — plumbed from data the pipeline already computes.
+  - Proximity batch (places.py, 8 fields): nearest bus stop / grocery / park /
+    clinic / library / pharmacy / school / qualifying transit — via OpenStreetMap
+    Overpass (free, no key). OSM completeness varies (informational reads).
+  - slope_grade (slope.py): DERIVED from USGS 3DEP elevation (EPQS) — max grade
+    over a 40 m sample, Yes >= 10%. A DEM screen; confirm on site.
+  - cell_towers (towers.py): HIFLD/FCC Cellular Towers proximity (<=150 m = Yes).
+    Absence is NOT authoritative (FCC licensing subset is sparse) — caveated.
+  - airport_hazard_zone (airport.py): LA County ALUC A-NET (LA County only; raises
+    elsewhere -> manual, no statewide AIA layer exists).
+  - coastal_zone (coastal.py): CA Coastal Commission / Caltrans Coastal Zone
+    polygon (statewide point-in-polygon).
+  - tier_transit_verification (zimas.py): derived LA-City summary of TOC tier +
+    ½-mile major transit.
+- streetview.py: key-ready Street View Static pre-screen AID for the site-visit
+  fields. NOT wired into collect (needs GOOGLE_MAPS_API_KEY, and dated/single-time
+  imagery is an aid, not a VERIFIED source). geocoder now also returns `place`.
+
 ## v0.7-draft (2026-06-15)
 - pha automated (pha.py, now 24 readers): resolves the governing Public Housing
   Authority from incorporated city + county against HUD's authoritative Public

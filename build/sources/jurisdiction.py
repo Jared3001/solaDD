@@ -78,8 +78,50 @@ def geographic_pool(geo) -> dict:
             "notes": f"{name} County -> {region} (CDLAC region). Source: canonical/cdlac_regions.csv."}
 
 
+# --- "free wins": identity fields derived from data we already compute ---
+
+def address(geo) -> dict:
+    a = geo.get("matched_address")
+    if not a:
+        raise LookupError("no matched address on geo")
+    return {"answer": a, "notes": "Geocoder-matched address. Source: U.S. Census geocoder."}
+
+
+def apn(geo) -> dict:
+    import zimas
+    if zimas.in_la_city(geo):
+        bpp = zimas._snapped(geo)[0].get("BPP")
+        formatted = f"{bpp[:4]}-{bpp[4:7]}-{bpp[7:]}" if bpp and len(bpp) == 10 else bpp
+        return {"answer": formatted, "notes": f"APN {formatted} from LA City parcel snap. Source: LA City Parcels."}
+    import parcel
+    ain, matched = parcel._county_snap(geo)
+    if not ain:
+        raise LookupError("APN not resolved at parcel")
+    formatted = f"{ain[:4]}-{ain[4:7]}-{ain[7:]}" if len(ain) == 10 else ain
+    flag = "" if matched else " (nearest parcel — verify)"
+    return {"answer": formatted, "state": "VERIFIED" if matched else "JUDGMENT",
+            "notes": f"APN {formatted} from LA County parcel{flag}. Source: LA County Assessor."}
+
+
+def city_jurisdiction(geo) -> dict:
+    import zimas
+    county = _county_basename(geo)
+    if zimas.in_la_city(geo):
+        return {"answer": "City of Los Angeles",
+                "notes": "Parcel within City of LA limits (LA City parcel layer). Source: LA City / Census."}
+    place = geo.get("place")
+    if place:
+        return {"answer": f"City of {place}",
+                "notes": f"Incorporated place: {place}. Source: U.S. Census Incorporated Places."}
+    if county:
+        return {"answer": f"Unincorporated {county} County",
+                "notes": f"No incorporated place at parcel -> unincorporated {county} County. Source: U.S. Census."}
+    raise LookupError("could not determine jurisdiction")
+
+
 if __name__ == "__main__":
     import sys, json
     from geocoder import geocode
     g = geocode(" ".join(sys.argv[1:]) or "4201 Pico Blvd, Los Angeles, CA")
-    print(json.dumps({"county": county(g), "geographic_pool": geographic_pool(g)}, indent=2))
+    print(json.dumps({"address": address(g), "apn": apn(g), "city_jurisdiction": city_jurisdiction(g),
+                      "county": county(g), "geographic_pool": geographic_pool(g)}, indent=2))

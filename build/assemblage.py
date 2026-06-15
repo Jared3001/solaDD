@@ -42,6 +42,10 @@ import zimas
 LACITY_PARCELS = "https://maps.lacity.org/lahub/rest/services/Landbase_Information/MapServer"
 PARCEL_LAYER = 5   # "Parcels" — geometry area in EPSG:2229 reproduces ZIMAS lot area
 
+# Fields assemblage computes itself at the site level (not per-parcel aggregated):
+# combined land area + the per-APN list (address is a per-parcel placeholder here).
+_SITE_LEVEL = {"land_sf", "apn", "address"}
+
 
 def _norm(apn: str) -> str:
     """'5082-024-018' -> '5082024018' (BPP key)."""
@@ -96,7 +100,7 @@ def _run_readers(parcel):
            "place": parcel.get("place"), "matched_address": parcel["matched_address"]}
     out = {}
     for fid, fn in {**READERS, **ZIMAS_READERS}.items():
-        if fid == "land_sf":   # assemblage writes COMBINED land_sf itself
+        if fid in _SITE_LEVEL:   # assemblage writes these itself (combined / per-APN list)
             continue
         try:
             r = fn(geo)
@@ -189,7 +193,7 @@ def assess(wb_path, apns, property_id=None):
     print("-" * 100)
     agg = {}
     for fid in [*READERS, *ZIMAS_READERS]:
-        if fid not in by_id or fid == "land_sf":   # land_sf written as combined above
+        if fid not in by_id or fid in _SITE_LEVEL:   # site-level fields written above
             continue
         a = _aggregate(fid, atype.get(fid), per)
         agg[fid] = a

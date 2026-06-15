@@ -5,3 +5,4 @@ properties/
 .venv/
 build/_*.xlsx
 build/sources/_cache/
+build/_streetview*

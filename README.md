@@ -12,8 +12,9 @@ build/       validate.py (drift guard) · generate.py (build master from schema)
              assemblage.py (multi-APN block: combined land area + aggregated designations)
 build/sources/  geocoder.py (keystone) + Tier-A readers: fema · hud · tcac · oz ·
              calfire · calgem · cgs · ust · zimas (LA-City block via NavigateLA REST) ·
-             jurisdiction (county, geographic_pool) · parcel (land_sf) · nc (neighborhood change) ·
-             pha (governing public housing authority)
+             jurisdiction (county, geographic_pool, address, apn, city_jurisdiction) · parcel (land_sf) ·
+             nc (neighborhood change) · pha (housing authority) · places (nearest_* via OSM) ·
+             slope (USGS 3DEP) · towers (cell) · airport (ALUC) · coastal (CCC) · streetview (key-ready aid)
              (each → {answer,notes}; _arcgis.py shared query helper)
 template/    Checklist_BLANK_master.xlsx  ← the blank; copied per property, never edited
 logs/        scrub_inventory.csv (one-time master cleanup record)

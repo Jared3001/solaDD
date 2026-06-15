@@ -258,6 +258,19 @@ def half_mile_major_transit(geo) -> dict:
             "notes": "Not within ½ mile of a major transit stop (AB2097 buffer). Source: LA City Planning."}
 
 
+def tier_transit_verification(geo) -> dict:
+    """LA-City Tier/Transit verification — summarizes the TOC tier + the ½-mile
+    major-transit finding (both already read from LA City Planning layers) into one
+    verification line. Confirm formal SB35/density-bonus eligibility against the
+    current LADCP determination."""
+    toc = toc_tier(geo)
+    hm = half_mile_major_transit(geo)
+    return {"answer": f"{toc['answer']}; ½-mi major transit: {hm['answer']}",
+            "notes": f"TOC {toc['answer']}; within ½ mile of a major transit stop: {hm['answer']}. "
+                     f"Derived from LA City Planning TOC + AB2097 layers; confirm formal eligibility "
+                     f"(SB35/density bonus) against the current LADCP determination. Source: LA City Planning."}
+
+
 if __name__ == "__main__":
     import sys, json
     from geocoder import geocode
