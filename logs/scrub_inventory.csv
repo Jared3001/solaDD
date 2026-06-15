@@ -1,0 +1,65 @@
+cell,field_label,column_role,current_value,classification,recommended_action
+C10,Status,answer(C),Escrow,CARRYOVER,Clear to blank
+C11,Revenue Classification,answer(C),LIHTC,CARRYOVER,Clear to blank
+C13,Land SF,answer(C),43488.5,CARRYOVER,Clear to blank
+C25,QCT?,answer(C),No,CARRYOVER,Clear to blank
+C26,DDA?,answer(C),No,CARRYOVER,Clear to blank
+C27,Resource Area,answer(C),High,CARRYOVER,Clear to blank
+C28,Neighborhood Change Area,answer(C),Yes,CARRYOVER,Clear to blank
+C29,Opportunity Zone,answer(C),No,CARRYOVER,Clear to blank
+C33,Nearest grocery store,answer(C),"Smart & Final, 2150 ft",CARRYOVER,Clear to blank
+C41,City/Jurisdiction,answer(C),Los Angeles,CARRYOVER,Clear to blank
+C42,Council/Supervisor District,answer(C),CD14 - De Leon,CARRYOVER,Clear to blank
+C43,Zoning,answer(C),C4-1-O,CARRYOVER,Clear to blank
+C46,Transitional Height / Adj Zones,answer(C),"Yes, RD3-1",CARRYOVER,Clear to blank
+C47,1/2 mile from Major Transit,answer(C),Yes,CARRYOVER,Clear to blank
+C48,TOC Tier (City of LA),answer(C),3,CARRYOVER,Clear to blank
+C50,Historic Status/Eligibility,answer(C),No,CARRYOVER,Clear to blank
+C51,Airport Hazard Zone,answer(C),No,CARRYOVER,Clear to blank
+C52,Coastal Zone,answer(C),No,CARRYOVER,Clear to blank
+C53,Flood Zone,answer(C),No,CARRYOVER,Clear to blank
+C54,Methane Hazard Zone (City of LA),answer(C),Methane Zone,CARRYOVER,Clear to blank
+C55,Very High Fire Hazard Zone,answer(C),No,CARRYOVER,Clear to blank
+C56,Special Grading Area (City of LA),answer(C),No,CARRYOVER,Clear to blank
+C57,Wells on site,answer(C),No,CARRYOVER,Clear to blank
+C58,Liquefaction Zone,answer(C),No,CARRYOVER,Clear to blank
+C59,Alquist-Priolo Fault Zone,answer(C),No,CARRYOVER,Clear to blank
+C60,Underground storage tanks,answer(C),No,CARRYOVER,Clear to blank
+C64,Alley,answer(C),Yes,CARRYOVER,Clear to blank
+C65,Overhead & Guy Wires,answer(C),Yes,CARRYOVER,Clear to blank
+C66,Slope/Grade,answer(C),Yes,CARRYOVER,Clear to blank
+C67,Trees,answer(C),Yes,CARRYOVER,Clear to blank
+C68,Billboards/Signs,answer(C),No,CARRYOVER,Clear to blank
+C70,Cell Towers,answer(C),No,CARRYOVER,Clear to blank
+C72,Power access/provider,answer(C),LADWP,CARRYOVER,Clear to blank
+C74,Sewer/Sanitation access/provider,answer(C),LA Sanitation,CARRYOVER,Clear to blank
+C76,Water access/provider,answer(C),LADWP,CARRYOVER,Clear to blank
+C81,NRSF,answer(C),11600,CARRYOVER,Clear to blank
+C83,Parking,answer(C),1,CARRYOVER,Clear to blank
+C84,Construction Type,answer(C),Stick - modular unit yield sign. lower,CARRYOVER,Clear to blank
+C85,Planning:,answer(C),potential GF retail req. - may be clear via ED1,CARRYOVER,Clear to blank
+C86,Chapter 11B:,answer(C),Yes,CARRYOVER,Clear to blank
+C89,Geotech/Soils,answer(C),"review, confirm no haul route",CARRYOVER,Clear to blank
+C91, Phase I,answer(C),"came through clean, no historical issues, etc",CARRYOVER,Clear to blank
+C93,ALTA Survey,answer(C),completed - review with title,CARRYOVER,Clear to blank
+C94,Dry Utility Report,answer(C),"review LADWP website for power, can set up call with service planner",CARRYOVER,Clear to blank
+C96,Tier/Transit Verification,answer(C),2023-04-07,CARRYOVER,Clear to blank
+C98,Litigation Review,answer(C),Review with MM,CARRYOVER,Clear to blank
+C99,Tree / Arborist Report,answer(C),"removed some branches for geotech, no issues with trees on site",CARRYOVER,Clear to blank
+C100,Haul route,answer(C),look into thresholds to see if were subject,CARRYOVER,Clear to blank
+C103,Preliminary Title Report,answer(C),most beautiful title ever - MW,CARRYOVER,Clear to blank
+C105,Litigation,answer(C),Review with MM,CARRYOVER,Clear to blank
+C109,"Existing residential units (#, beds)",answer(C),None,CARRYOVER,Clear to blank
+C117,SB8,answer(C),"Owner occupied, not an issue",CARRYOVER,Clear to blank
+C119,Feedback from last Deal Review,answer(C),Comment,AMBIGUOUS,Confirm: deal-review scaffolding or leftover?
+E56,Special Grading Area (City of LA),note(E),may be subject to haul route approval,CARRYOVER,Clear to blank
+E65,Overhead & Guy Wires,note(E),Power line runs through middle of site,CARRYOVER,Clear to blank
+E66,Slope/Grade,note(E),relatively flat,CARRYOVER,Clear to blank
+E67,Trees,note(E),Trees encroaching on crenshaw,CARRYOVER,Clear to blank
+E99,Tree / Arborist Report,note(E),JL to get price on tree removal,CARRYOVER,Clear to blank
+E100,Haul route,note(E),"Subject to hillside ord, threshold approx 500 cubic yards",CARRYOVER,Clear to blank
+B119,Feedback from last Deal Review,label(B),Feedback from last Deal Review,AMBIGUOUS,Confirm: scaffolding vs leftover (deal-review block / sign-off dates)
+B121,[Date],label(B),[Date],AMBIGUOUS,Confirm: scaffolding vs leftover (deal-review block / sign-off dates)
+B122,[Date],label(B),[Date],AMBIGUOUS,Confirm: scaffolding vs leftover (deal-review block / sign-off dates)
+B123,[Date],label(B),[Date],AMBIGUOUS,Confirm: scaffolding vs leftover (deal-review block / sign-off dates)
+B124,[Date],label(B),[Date],AMBIGUOUS,Confirm: scaffolding vs leftover (deal-review block / sign-off dates)

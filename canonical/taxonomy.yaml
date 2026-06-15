@@ -1,0 +1,200 @@
+# =====================================================================
+# Acquisition Site Feasibility — DD State Taxonomy
+# =====================================================================
+# Companion to Site_Feasibility_DD_Field_Schema.yaml.
+# The SCHEMA defines fields (the rows: what each item is, how it's sourced).
+# This TAXONOMY defines STATE (the per-cell condition of a given property's
+# answer: resolved / open / why / who unblocks it).
+#
+# Fields and states are orthogonal: one field can pass through several states
+# over a deal's life. State is recorded in a DEDICATED STATUS COLUMN
+# (Column A) on each property's sheet; attempt history lives in a companion
+# State Log tab.
+#
+# Locked decisions (from review):
+#   - granularity: FINE (full state set + attempt tracking)
+#   - state_location: dedicated status column (placed in Column A; see note)
+#   - tool_failure: own retryable state, with attempt log + auto-escalation
+# ---------------------------------------------------------------------
+
+meta:
+  taxonomy_version: "0.1-draft"
+  companion_schema: "Site_Feasibility_DD_Field_Schema.yaml"
+  applies_to: "Acquisition_Site_Feasibility_Checklist (sheet 'Site DD')"
+  built_on: "2026-06-15"
+
+status_column:
+  location: "A"
+  rationale: >
+    Column A is empty across the master, so using it as the status gutter adds a
+    dedicated state column WITHOUT inserting columns — which would otherwise break
+    the C16/C17/C80 formulas, the dropdown sqref ranges, and the runbook's
+    'Column C = answer / Column E = notes' conventions. Trade-off: the gutter sits
+    left of the label rather than beside the answer. Reversible if you prefer an
+    inserted adjacent column (cost: rewrite formula refs + DV ranges).
+  token_grammar: >
+    One token per field row. Most states are a bare token (e.g. BROWSER-PENDING).
+    TOOL-FAIL carries a live attempt counter: 'TOOL-FAIL 2/3'.
+  example_tokens: ["DESK-PENDING", "BROWSER-PENDING", "TOOL-FAIL 2/3", "VERIFIED", "NA"]
+
+# ---------------------------------------------------------------------
+# The canonical state vocabulary.
+#   category:    open | closed | placeholder
+#   unblocked_by: who/what moves it forward
+#   retryable:   true only for automated states safe to re-attempt unattended
+# ---------------------------------------------------------------------
+states:
+
+  # --- OPEN (work owed) ---
+  - id: DESK-PENDING
+    label: "Desk fill owed"
+    category: open
+    unblocked_by: "analyst — desk-fill from OM / listing / leases"
+    retryable: false
+    resolves_to: [OM-SOURCED, VERIFIED, NA]
+    description: "An OM/desk-sourced fact has not yet been entered."
+
+  - id: BROWSER-PENDING
+    label: "Map/GIS read owed"
+    category: open
+    unblocked_by: "analyst — read the source-of-record viewer at the parcel"
+    retryable: false
+    resolves_to: [VERIFIED, TOOL-FAIL, NA]
+    description: "A browser/GIS verification (ZIMAS, HUD, TCAC, FEMA, CGS, CAL FIRE, CalGEM, GeoTracker) is outstanding."
+
+  - id: EXTERNAL-PENDING
+    label: "Third party owed"
+    category: open
+    unblocked_by: "external party — will-serve, agency confirmation, commissioned report, title"
+    retryable: false
+    resolves_to: [VERIFIED, NA]
+    description: "Resolution depends on someone outside the team returning something (will-serve letter, Phase I/II, ALTA, prelim title, permit pull)."
+
+  - id: SITE-VISIT
+    label: "Site observation owed"
+    category: open
+    unblocked_by: "analyst — physical site observation"
+    retryable: false
+    resolves_to: [VERIFIED, NA]
+    description: "Requires eyes on the parcel (squatters, trees, overhead lines, slope)."
+
+  - id: JUDGMENT
+    label: "Senior decision owed"
+    category: open
+    unblocked_by: "senior SOLA staff — route up, do not decide as intern"
+    retryable: false
+    resolves_to: [VERIFIED, OM-SOURCED, NA]
+    description: "A classification or borderline call (revenue class, half-mile transit, SB8 exposure, litigation posture)."
+
+  - id: TOOL-FAIL
+    label: "Tool failed — retryable"
+    category: open
+    unblocked_by: "automation — re-run the read; auto-escalates if it keeps failing"
+    retryable: true
+    counter: "attempt_no / escalation.max_attempts  (e.g. 2/3)"
+    escalates_to: MANUAL-VERIFY
+    resolves_to: [VERIFIED, MANUAL-VERIFY]
+    description: >
+      An automated read was attempted and the tool errored or was unresponsive
+      (e.g. CalGEM browser instability). Distinct from BROWSER-PENDING, which has
+      not necessarily been attempted. Safe to retry unattended until the
+      escalation threshold.
+
+  - id: MANUAL-VERIFY
+    label: "Manual verify (retries exhausted)"
+    category: open
+    unblocked_by: "analyst — open the source URL manually (runbook §9 fallback)"
+    retryable: false
+    resolves_to: [VERIFIED, NA]
+    description: "Auto-retries exhausted; the item is now a human task and is no longer auto-retried."
+
+  # --- CLOSED (resolved) ---
+  - id: VERIFIED
+    label: "Verified — primary source"
+    category: closed
+    unblocked_by: "—"
+    retryable: false
+    description: "Confirmed against the authoritative source of record at the parcel; source + date recorded in Notes."
+
+  - id: OM-SOURCED
+    label: "OM-sourced (secondary)"
+    category: closed
+    unblocked_by: "—"
+    retryable: false
+    description: "A secondary fact taken from the OM/listing and labeled as such — acceptable only for facts the OM is authoritative on (price, APN, lot size, entitlement status). Lower assurance than VERIFIED."
+
+  - id: COMPUTED
+    label: "Computed (formula)"
+    category: closed
+    unblocked_by: "—"
+    retryable: false
+    description: "Auto-derived by an Excel formula ($/LSF, $/Unit, linked Unit Count). Re-check if its inputs change; never hand-entered."
+
+  - id: NA
+    label: "Not applicable"
+    category: closed
+    unblocked_by: "—"
+    retryable: false
+    description: "Field does not apply — a City-of-LA-only overlay on a non-LA site, or a stage-gated field (Status/contingency/COE) before the deal reaches that stage. Carries a one-line reason in Notes; never left blank."
+
+  # --- PLACEHOLDER ---
+  - id: ASSIGN
+    label: "Awaiting assignment"
+    category: placeholder
+    unblocked_by: "SOLA — assign the role"
+    retryable: false
+    description: "A role/owner placeholder (Acq Lead, Dev Lead)."
+
+# ---------------------------------------------------------------------
+# Attempt tracking + auto-escalation (realizes the FINE granularity choice
+# without doubling every pending state). The not-yet-attempted vs
+# attempted-incomplete distinction is carried by State Log attempt_no/outcome,
+# not by separate sheet states.
+# ---------------------------------------------------------------------
+escalation:
+  applies_to: TOOL-FAIL
+  max_attempts: 3            # tunable
+  on_exhaustion: "convert TOOL-FAIL -> MANUAL-VERIFY; log the escalation; stop auto-retry"
+  not_yet_attempted: "attempt_no == 0"
+  attempted_incomplete: "attempt_no >= 1 and outcome != success"
+
+state_log:
+  location: "tab 'State Log'"
+  append_only: true
+  purpose: "Audit trail + the source of truth for attempt counts, escalation, and 'retry everything that failed' queries."
+  columns:
+    - timestamp        # ISO8601 of the attempt
+    - property_id      # which property sheet/file
+    - field_id         # schema field id (e.g. wells_on_site)
+    - tool             # source attempted (e.g. CalGEM WellFinder)
+    - outcome          # success | fail | partial
+    - attempt_no       # 0 = not yet attempted; increments per retry
+    - error_snippet    # short reason on fail (e.g. 'viewer unresponsive')
+
+# ---------------------------------------------------------------------
+# Initialization map: schema.default_state  ->  initial taxonomy state.
+# Used to populate Column A on a fresh blank sheet in one pass from the schema.
+# ---------------------------------------------------------------------
+default_state_map:
+  desk_fill:        DESK-PENDING
+  computed:         COMPUTED
+  verify_browser:   BROWSER-PENDING
+  verify_external:  EXTERNAL-PENDING
+  verify_judgment:  JUDGMENT
+  site_visit:       SITE-VISIT
+  assign:           ASSIGN
+  na_until_stage:   NA
+
+# ---------------------------------------------------------------------
+# Allowed transitions (guards automation against illegal jumps).
+# ---------------------------------------------------------------------
+transitions:
+  DESK-PENDING:      [OM-SOURCED, VERIFIED, NA]
+  BROWSER-PENDING:   [VERIFIED, TOOL-FAIL, NA]
+  TOOL-FAIL:         [VERIFIED, TOOL-FAIL, MANUAL-VERIFY]   # self = another counted retry
+  MANUAL-VERIFY:     [VERIFIED, NA]
+  EXTERNAL-PENDING:  [VERIFIED, NA]
+  SITE-VISIT:        [VERIFIED, NA]
+  JUDGMENT:          [VERIFIED, OM-SOURCED, NA]
+  # closed/placeholder states are terminal except via explicit re-open by an analyst
+  note: "Any state may be re-opened manually by an analyst (e.g. stale designation re-pull); log the reason."

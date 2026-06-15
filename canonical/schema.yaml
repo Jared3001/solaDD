@@ -1,0 +1,401 @@
+# =====================================================================
+# Acquisition Site Feasibility — DD Field Schema
+# =====================================================================
+# Canonical, machine-readable field dictionary for the Site DD checklist.
+# Source of truth = master workbook "Acquisition_Site_Feasibility_Checklist_2026_06.xlsx",
+# sheet "Site DD". Structural facts (row, answer_cell, dropdown, formula) are
+# extracted verbatim from that file. Semantic attributes (fill_method,
+# jurisdiction_scope, source_of_record, guardrail, default_state) are authored
+# to drive automation and are intended for senior review.
+#
+# This schema describes FIELDS (the rows / what each item is). It deliberately
+# does NOT encode per-cell STATE (VERIFY / placeholder / verified) — that
+# vocabulary is the next workstream (the state taxonomy). `default_state` below
+# uses provisional tokens as a placeholder and is flagged PROVISIONAL.
+#
+# It also does NOT encode the carryover/leftover values currently sitting in
+# the master — those are a one-time cleanup item, captured separately in the
+# scrub inventory, not part of the timeless field definition.
+# ---------------------------------------------------------------------
+
+meta:
+  schema_version: "0.1-draft"
+  built_from: "Acquisition_Site_Feasibility_Checklist_2026_06.xlsx / sheet 'Site DD'"
+  built_on: "2026-06-15"
+  answer_column: "C"          # runbook 'Column C (Details/Condition)' = the glance answer
+  notes_column: "E"           # runbook 'Column E (Notes)'
+  supporting_doc_column: "D"
+  guidelines_column: "F"
+  signoff_columns: ["G (Acq)", "H (Date)", "I (Dev)", "J (Date)"]
+  note: >
+    Column letters confirmed against the master. The earlier Google-exported
+    markdown had collapsed/shifted columns; this file uses the real .xlsx layout.
+
+legends:
+
+  answer_type:
+    text:        "free text"
+    number:      "numeric (see unit)"
+    currency:    "USD"
+    date:        "date"
+    yes_no:      "two-option dropdown Yes/No"
+    enum:        "fixed dropdown, options listed per field"
+    enum_tier:   "ordered category dropdown (e.g. methane)"
+    computed:    "Excel formula, not hand-entered (see formula)"
+    assign:      "role placeholder, owned by SOLA staff"
+
+  fill_method:
+    desk_om:            "desk-fill from OM / listing / leases (OM authoritative for deal facts)"
+    computed:           "auto via Excel formula"
+    browser_gis:        "interactive GIS / map verification at the parcel (runbook S5)"
+    places_tool:        "proximity measure via Google Maps/Places, expressed in feet"
+    external_party:     "requires a third party (will-serve, agency confirmation)"
+    counsel:            "requires legal counsel"
+    external_report:    "requires a commissioned report / vendor deliverable"
+    site_visit:         "requires physical site observation"
+    assign:             "SOLA to assign a person"
+    jurisdiction_derived: "derived from County + city limits (via lookup), not independently sourced"
+
+  # How a field behaves when the deal moves to a DIFFERENT jurisdiction.
+  # Encodes the runbook's #1 insight (re-map jurisdiction FIRST) directly into the schema.
+  jurisdiction_scope:
+    always:             "applies everywhere; statewide/federal source of record (does not change by city)"
+    jurisdiction_routed: "applies everywhere, but the AUTHORITY/TOOL changes by jurisdiction (e.g. ZIMAS for LA City, local GIS/SCAG otherwise)"
+    la_city_only:       "a City-of-LA-specific overlay/program; auto-mark N/A (with one-line reason) on non-LA-City sites"
+
+  # PROVISIONAL — to be replaced by the state taxonomy (next workstream).
+  default_state:
+    desk_fill:          "expected resolvable at desk from OM"
+    computed:           "auto"
+    verify_browser:     "open until confirmed at the parcel in the source-of-record map"
+    verify_external:    "open until a third party / report / counsel returns"
+    verify_judgment:    "route to senior staff for a call (not an intern decision)"
+    site_visit:         "open until site observation"
+    assign:             "awaiting SOLA assignment"
+    na_until_stage:     "N/A until the deal reaches the stage the field assumes (e.g. pre-offer)"
+
+# Ordered sections as they appear in the master (this is the canonical order;
+# note it differs from the reordered 3801 copy).
+sections:
+  - {id: header,      label: "Header / Identity",            start_row: 2}
+  - {id: business,    label: "Business Plan / Transaction",  start_row: 9}
+  - {id: lihtc_cdlac, label: "LIHTC/CDLAC Related",          start_row: 21}
+  - {id: location,    label: "Location Related",             start_row: 31}
+  - {id: zoning_hazard, label: "Zoning & Hazard Research",   start_row: 40}
+  - {id: physical,    label: "Physical Development Conditions", start_row: 62}
+  - {id: building,    label: "Building Characteristics",     start_row: 79}
+  - {id: reports,     label: "Reports",                      start_row: 88}
+  - {id: title_legal, label: "Title, Legal, and Records",    start_row: 102}
+  - {id: tenant,      label: "Tenant Conditions",            start_row: 108}
+  - {id: deal_review, label: "Feedback from last Deal Review", start_row: 119, status: "AMBIGUOUS — confirm whether template scaffolding or leftover"}
+
+fields:
+
+  # ---------------- Header / Identity ----------------
+  - {id: address, label: "ADDRESS", section: header, row: 3, answer_cell: C3,
+     answer_type: text, fill_method: desk_om, source_of_record: "OM/listing", jurisdiction_scope: always, default_state: desk_fill}
+  - {id: apn, label: "APN", section: header, row: 4, answer_cell: C4,
+     answer_type: text, fill_method: desk_om, source_of_record: "OM/listing; confirm county assessor", jurisdiction_scope: always, default_state: desk_fill,
+     guardrail: "OM-authoritative, but confirm against county assessor; multi-parcel/assemblage sites have >1 APN — schema currently assumes one."}
+  - {id: acq_lead, label: "Acq Lead:", section: header, row: 5, answer_cell: C5, answer_type: assign, fill_method: assign, default_state: assign}
+  - {id: dev_lead, label: "Dev Lead:", section: header, row: 6, answer_cell: C6, answer_type: assign, fill_method: assign, default_state: assign}
+  - {id: date_last_updated, label: "Date last updated:", section: header, row: 7, answer_cell: C7, answer_type: date, fill_method: desk_om, default_state: desk_fill}
+
+  # ---------------- Business Plan / Transaction ----------------
+  - {id: status, label: "Status", section: business, row: 10, answer_cell: C10,
+     answer_type: enum, dropdown_verbatim: "Offer,Escrow,Non-refundable,Closed",
+     allowed_values: ["Offer","Escrow","Non-refundable","Closed"], allowed_values_status: confirmed,
+     fill_method: desk_om, source_of_record: "deal stage", jurisdiction_scope: always, default_state: na_until_stage,
+     guardrail: "Menu has NO pre-offer/on-market option. For an on-market, not-under-contract site, leave blank (do not force a menu option) per runbook."}
+  - {id: revenue_classification, label: "Revenue Classification", section: business, row: 11, answer_cell: C11,
+     answer_type: enum, dropdown_verbatim: "Restricted Section 8 / ED1,Unrestricted Section 8,Workforce,LIHTC",
+     allowed_values: ["Restricted Section 8 / ED1","Unrestricted Section 8","Workforce","LIHTC"], allowed_values_status: "confirmed_trimmed",
+     fill_method: desk_om, source_of_record: "SOLA program intent", jurisdiction_scope: always, default_state: verify_judgment,
+     guardrail: "Program classification is a senior-staff call, not an intern decision — route up. Canonical menu = 4 trimmed options (the original ' LIHTC' leading-space defect is removed). OPEN: confirm with senior staff that Workforce and LIHTC are intended as separate options (Excel splits on the comma)."}
+  - {id: entitlement_strategy, label: "Entitlement Strategy", section: business, row: 12, answer_cell: C12,
+     answer_type: text, fill_method: desk_om, source_of_record: "OM/listing; entitlement record", jurisdiction_scope: jurisdiction_routed, default_state: desk_fill,
+     guardrail: "Verify any 'entitled / by-right / RTI' claim against the record — never inherit it from the OM as fact."}
+  - {id: land_sf, label: "Land SF", section: business, row: 13, answer_cell: C13,
+     answer_type: number, unit: sf, fill_method: desk_om, source_of_record: "OM/listing; reconcile ALTA survey", jurisdiction_scope: always, default_state: desk_fill,
+     guardrail: "Capture GROSS vs BUILDABLE separately when they differ (fault setback, slope). $/LSF computes on gross; underwriting should use buildable."}
+  - {id: estimated_unit_count, label: "Estimated Unit Count", section: business, row: 14, answer_cell: C14,
+     answer_type: number, unit: units, fill_method: desk_om, source_of_record: "OM/concept; Architectural Yield Study", jurisdiction_scope: always, default_state: desk_fill,
+     guardrail: "Yield not confirmed until tested against buildable area. Cross-check header/narrative vs area breakdown (the 195-vs-186 error class)."}
+  - {id: acquisition_price, label: "Acquisition Price", section: business, row: 15, answer_cell: C15,
+     answer_type: currency, fill_method: desk_om, source_of_record: "OM/listing (asking, not negotiated)", jurisdiction_scope: always, default_state: desk_fill}
+  - {id: price_per_lsf, label: "$ / LSF", section: business, row: 16, answer_cell: C16,
+     answer_type: computed, formula: "=IFERROR(C15/C13,0)", computed_from: [acquisition_price, land_sf], default_state: computed,
+     guardrail: "Divides by GROSS land SF (C13). If C13 holds gross, this understates true $/buildable-sf — flag both figures."}
+  - {id: price_per_unit, label: "$ / Unit", section: business, row: 17, answer_cell: C17,
+     answer_type: computed, formula: "=IFERROR(C15/C14,0)", computed_from: [acquisition_price, estimated_unit_count], default_state: computed}
+  - {id: contingency_removal_date, label: "Contingency Removal Date", section: business, row: 18, answer_cell: C18,
+     answer_type: date, fill_method: desk_om, source_of_record: "PSA", jurisdiction_scope: always, default_state: na_until_stage}
+  - {id: est_close_of_escrow, label: "Est. Close of Escrow", section: business, row: 19, answer_cell: C19,
+     answer_type: date, fill_method: desk_om, source_of_record: "PSA", jurisdiction_scope: always, default_state: na_until_stage}
+
+  # ---------------- LIHTC/CDLAC Related ----------------
+  - {id: geographic_pool, label: "Geographic Pool", section: lihtc_cdlac, row: 22, answer_cell: C22,
+     answer_type: enum, dropdown_verbatim: "City of LA,Balance of LA County,Inland Region,Coastal Region,Northern Region,Bay Area Region,None",
+     allowed_values: ["City of LA","Balance of LA County","Inland Region","Coastal Region","Northern Region","Bay Area Region","None"], allowed_values_status: confirmed,
+     fill_method: jurisdiction_derived, source_of_record: "CDLAC region (Sheet1 lookup) + city limits", jurisdiction_scope: jurisdiction_routed, default_state: desk_fill,
+     guardrail: "Derive from County via the CDLAC lookup; 'City of LA' only if within LA city limits, else 'Balance of LA County'."}
+  - {id: county, label: "County", section: lihtc_cdlac, row: 23, answer_cell: C23,
+     answer_type: text, fill_method: desk_om, source_of_record: "address", jurisdiction_scope: always, default_state: desk_fill}
+  - {id: pha, label: "PHA", section: lihtc_cdlac, row: 24, answer_cell: C24,
+     answer_type: text, fill_method: jurisdiction_derived, source_of_record: "HUD PHA contact report",
+     source_url: "https://www.hud.gov/sites/dfiles/PIH/documents/PHA_Contact_Report_CA.pdf",
+     jurisdiction_scope: jurisdiction_routed, default_state: verify_external,
+     guardrail: "County PHA vs a city's own housing authority differ — confirm which operates the parcel."}
+  - {id: qct, label: "QCT?", section: lihtc_cdlac, row: 25, answer_cell: C25,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "HUD SADDA", source_url: "https://www.huduser.gov/portal/sadda/sadda_qct.html",
+     jurisdiction_scope: always, default_state: verify_browser,
+     guardrail: "Toggle QCT layer on (defaults off); record census tract. A QCT can also be an OZ — see opportunity_zone."}
+  - {id: dda, label: "DDA?", section: lihtc_cdlac, row: 26, answer_cell: C26,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "HUD SADDA", source_url: "https://www.huduser.gov/portal/sadda/sadda_qct.html",
+     jurisdiction_scope: always, default_state: verify_browser,
+     guardrail: "Small Area DDA qualifier (130% basis boost) goes in Notes, not the Yes/No cell."}
+  - {id: resource_area, label: "Resource Area", section: lihtc_cdlac, row: 27, answer_cell: C27,
+     answer_type: text, fill_method: browser_gis, source_of_record: "TCAC/HCD Opportunity Map",
+     source_url: "https://belonging.berkeley.edu/2026-ctcachcd-affh-mapping-tool",
+     jurisdiction_scope: always, default_state: verify_browser,
+     guardrail: "MUST click the parcel's tract (default tract is a placeholder). ZIMAS's TCAC field LAGS — confirm here, not in ZIMAS. Record Designation + score."}
+  - {id: neighborhood_change_area, label: "Neighborhood Change Area", section: lihtc_cdlac, row: 28, answer_cell: C28,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "TCAC/HCD Neighborhood Change",
+     source_url: "https://belonging.berkeley.edu/2026-ctcachcd-affh-mapping-tool", jurisdiction_scope: always, default_state: verify_browser}
+  - {id: opportunity_zone, label: "Opportunity Zone", section: lihtc_cdlac, row: 29, answer_cell: C29,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "Novogradac / HUD OZ map",
+     source_url: "https://www.novoco.com/public-media/mapbox/opzone/gozone_map_18.html", jurisdiction_scope: always, default_state: verify_browser,
+     guardrail: "The 'Highest Resource => not an OZ' shortcut BREAKS when the tract is a QCT — pull the OZ map. OZ 2.0 is unpassed; do not rely on it. Recommend retiring the shortcut from any automated path (always pull the map)."}
+
+  # ---------------- Location Related (proximity, feet) ----------------
+  - {id: nearest_bus_stop, label: "Nearest bus stop", section: location, row: 32, answer_cell: C32,
+     answer_type: text, unit: ft, fill_method: places_tool, source_of_record: "Google Maps/Places", jurisdiction_scope: always, default_state: verify_external}
+  - {id: nearest_grocery_store, label: "Nearest grocery store", section: location, row: 33, answer_cell: C33,
+     answer_type: text, unit: ft, fill_method: places_tool, source_of_record: "Google Maps/Places", jurisdiction_scope: always, default_state: verify_external}
+  - {id: nearest_park, label: "Nearest park", section: location, row: 34, answer_cell: C34,
+     answer_type: text, unit: ft, fill_method: places_tool, source_of_record: "Google Maps/Places", jurisdiction_scope: always, default_state: verify_external,
+     guardrail: "Exclude pocket parks / open space without a marked trailhead."}
+  - {id: nearest_medical_clinic, label: "Nearest medical clinic", section: location, row: 35, answer_cell: C35,
+     answer_type: text, unit: ft, fill_method: places_tool, source_of_record: "Google Maps/Places", jurisdiction_scope: always, default_state: verify_external}
+  - {id: nearest_library, label: "Nearest library", section: location, row: 36, answer_cell: C36,
+     answer_type: text, unit: ft, fill_method: places_tool, source_of_record: "Google Maps/Places", jurisdiction_scope: always, default_state: verify_external}
+  - {id: nearest_pharmacy, label: "Nearest pharmacy", section: location, row: 37, answer_cell: C37,
+     answer_type: text, unit: ft, fill_method: places_tool, source_of_record: "Google Maps/Places", jurisdiction_scope: always, default_state: verify_external}
+  - {id: nearest_school, label: "Nearest school", section: location, row: 38, answer_cell: C38,
+     answer_type: text, unit: ft, fill_method: places_tool, source_of_record: "Google Maps/Places; district lookup", jurisdiction_scope: always, default_state: verify_external,
+     guardrail: "Capture school district as well as distance."}
+
+  # ---------------- Zoning & Hazard Research ----------------
+  - {id: city_jurisdiction, label: "City/Jurisdiction", section: zoning_hazard, row: 41, answer_cell: C41,
+     answer_type: text, fill_method: desk_om, source_of_record: "address; incorporated vs LA County unincorporated", jurisdiction_scope: always, default_state: desk_fill,
+     guardrail: "PHASE-1 DRIVER. Set this first — it determines authority routing for every 'jurisdiction_routed' and 'la_city_only' field below."}
+  - {id: council_supervisor_district, label: "Council/Supervisor District", section: zoning_hazard, row: 42, answer_cell: C42,
+     answer_type: text, fill_method: browser_gis, source_of_record: "city/county district finder", jurisdiction_scope: jurisdiction_routed, default_state: verify_browser,
+     guardrail: "Note at-large councils (no numbered district)."}
+  - {id: zoning, label: "Zoning", section: zoning_hazard, row: 43, answer_cell: C43,
+     answer_type: text, fill_method: browser_gis, source_of_record: "ZIMAS (LA City) or local planning", jurisdiction_scope: jurisdiction_routed, default_state: verify_browser}
+  - {id: q_conditions_la, label: "Q-Conditions (City of LA)", section: zoning_hazard, row: 44, answer_cell: C44,
+     answer_type: text, fill_method: browser_gis, source_of_record: "ZIMAS", jurisdiction_scope: la_city_only, default_state: verify_browser,
+     guardrail: "Auto-N/A off LA City with one-line reason."}
+  - {id: specific_plan_overlay, label: "Specific Plan or Overlay & Subarea", section: zoning_hazard, row: 45, answer_cell: C45,
+     answer_type: text, fill_method: browser_gis, source_of_record: "ZIMAS or local planning", jurisdiction_scope: jurisdiction_routed, default_state: verify_browser}
+  - {id: transitional_height_adj_zones, label: "Transitional Height / Adj Zones", section: zoning_hazard, row: 46, answer_cell: C46,
+     answer_type: text, fill_method: browser_gis, source_of_record: "ZIMAS (transitional height = LA concept) / adjacency always", jurisdiction_scope: jurisdiction_routed, default_state: verify_browser,
+     guardrail: "'Transitional height' is an LA-City mechanism (N/A elsewhere); adjacent-zone observation applies everywhere."}
+  - {id: half_mile_major_transit, label: "1/2 mile from Major Transit", section: zoning_hazard, row: 47, answer_cell: C47,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "ZIMAS if LA City, SCAG if not", jurisdiction_scope: jurisdiction_routed, default_state: verify_browser,
+     guardrail: "Borderline radius is a judgment call (affects density bonus / parking) — route up rather than deciding."}
+  - {id: toc_tier_la, label: "TOC Tier (City of LA)", section: zoning_hazard, row: 48, answer_cell: C48,
+     answer_type: text, fill_method: browser_gis, source_of_record: "ZIMAS", jurisdiction_scope: la_city_only, default_state: verify_browser,
+     guardrail: "Auto-N/A off LA City."}
+  - {id: nearest_qualifying_transit_stop, label: "Nearest qualifying transit stop", section: zoning_hazard, row: 49, answer_cell: C49,
+     answer_type: text, fill_method: places_tool, source_of_record: "transit map / Places", jurisdiction_scope: always, default_state: verify_external}
+  - {id: historic_status, label: "Historic Status/Eligibility", section: zoning_hazard, row: 50, answer_cell: C50,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "HistoricPlacesLA (LA City) / local historic inventory", jurisdiction_scope: jurisdiction_routed, default_state: verify_browser,
+     guardrail: "HistoricPlacesLA/HPOZ covers LA City only — use the local inventory elsewhere."}
+  - {id: airport_hazard_zone, label: "Airport Hazard Zone", section: zoning_hazard, row: 51, answer_cell: C51,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "ALUC / airport influence area", jurisdiction_scope: always, default_state: verify_browser}
+  - {id: coastal_zone, label: "Coastal Zone", section: zoning_hazard, row: 52, answer_cell: C52,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "CA Coastal Commission map (not ZIMAS)", jurisdiction_scope: always, default_state: verify_browser}
+  - {id: flood_zone, label: "Flood Zone", section: zoning_hazard, row: 53, answer_cell: C53,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "FEMA NFHL / MSC", source_url: "https://msc.fema.gov/portal/search",
+     jurisdiction_scope: always, default_state: verify_browser,
+     guardrail: "Record FIRM panel number + effective date in Notes. Zone (X/AE/etc.) qualifier in Notes; Yes/No = inside/outside SFHA."}
+  - {id: methane_hazard_zone_la, label: "Methane Hazard Zone (City of LA)", section: zoning_hazard, row: 54, answer_cell: C54,
+     answer_type: enum_tier, dropdown_verbatim: "No,Methane Buffer Zone,Methane Zone",
+     allowed_values: ["No","Methane Buffer Zone","Methane Zone"], allowed_values_status: "confirmed_trimmed",
+     fill_method: browser_gis, source_of_record: "ZIMAS methane overlay (LA City)", jurisdiction_scope: la_city_only, default_state: verify_browser,
+     guardrail: "The OVERLAY is LA-City-only (N/A elsewhere), but the HAZARD is not: near oil fields (e.g. Inglewood) commission an independent soil-gas assessment regardless. Canonical menu is trimmed (original ' Methane Buffer Zone' / ' Methane Zone' leading spaces removed)."}
+  - {id: very_high_fire_hazard_zone, label: "Very High Fire Hazard Zone", section: zoning_hazard, row: 55, answer_cell: C55,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "CAL FIRE / OSFM FHSZ Viewer", jurisdiction_scope: always, default_state: verify_browser,
+     guardrail: "TYPE MISMATCH: source returns a tier (Moderate/High/Very High) but the cell is Yes/No — a 'Moderate' parcel can't be represented honestly. Recommend converting to an enum_tier (None/Moderate/High/Very High) OR put tier in Notes. Also note recommended-vs-adopted map status (2025 maps are recommended until adopted by ordinance)."}
+  - {id: special_grading_area_la, label: "Special Grading Area (City of LA)", section: zoning_hazard, row: 56, answer_cell: C56,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "ZIMAS (LA City)", jurisdiction_scope: la_city_only, default_state: verify_browser,
+     guardrail: "Auto-N/A off LA City; local grading review applies instead."}
+  - {id: wells_on_site, label: "Wells on site", section: zoning_hazard, row: 57, answer_cell: C57,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "CalGEM WellFinder (C57 field)", jurisdiction_scope: always, default_state: verify_browser,
+     guardrail: "CalGEM browser instability is a known recurring failure — a blocked read is a tool failure (retryable), not an external dependency. Oil-field proximity raises real likelihood of idle/abandoned wells."}
+  - {id: liquefaction_zone, label: "Liquefaction Zone", section: zoning_hazard, row: 58, answer_cell: C58,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "CGS EQ Zapp", source_url: "https://maps.conservation.ca.gov/cgs/EQZApp/app/",
+     jurisdiction_scope: always, default_state: verify_browser,
+     guardrail: "Yes => mandatory geotechnical investigation. Read at the parcel via identify popup; record quad."}
+  - {id: alquist_priolo_fault_zone, label: "Alquist-Priolo Fault Zone", section: zoning_hazard, row: 59, answer_cell: C59,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "CGS EQ Zapp", source_url: "https://maps.conservation.ca.gov/cgs/EQZApp/app/",
+     jurisdiction_scope: always, default_state: verify_browser,
+     guardrail: "Yes => no-build setback that can sharply reduce buildable area (ties to land_sf gross-vs-buildable)."}
+  - {id: underground_storage_tanks, label: "Underground storage tanks", section: zoning_hazard, row: 60, answer_cell: C60,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "GeoTracker / EnviroStor + EPA UST Finder",
+     source_url: "https://www.epa.gov/ust/ust-finder , http://geotracker.waterboards.ca.gov/", jurisdiction_scope: always, default_state: verify_browser}
+
+  # ---------------- Physical Development Conditions ----------------
+  - {id: street_row_dedications, label: "Street ROW / Dedications Req'd", section: physical, row: 63, answer_cell: C63,
+     answer_type: text, fill_method: browser_gis, source_of_record: "NavigateLA (LA City) / local public works", jurisdiction_scope: jurisdiction_routed, default_state: verify_browser,
+     guardrail: "NavigateLA is LA-City-only — route to local public works elsewhere."}
+  - {id: alley, label: "Alley", section: physical, row: 64, answer_cell: C64, answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: browser_gis, source_of_record: "parcel map / GIS", jurisdiction_scope: jurisdiction_routed, default_state: verify_browser, guardrail: "State width and location in Notes."}
+  - {id: overhead_guy_wires, label: "Overhead & Guy Wires", section: physical, row: 65, answer_cell: C65, answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: site_visit, source_of_record: "site visit / photos", jurisdiction_scope: always, default_state: site_visit, guardrail: "Building must be 10' from high voltage."}
+  - {id: slope_grade, label: "Slope/Grade", section: physical, row: 66, answer_cell: C66, answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: site_visit, source_of_record: "topo / site visit", jurisdiction_scope: always, default_state: site_visit}
+  - {id: trees, label: "Trees", section: physical, row: 67, answer_cell: C67, answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: site_visit, source_of_record: "site visit / photos", jurisdiction_scope: jurisdiction_routed, default_state: site_visit, guardrail: "Check whether trees are protected under local ordinance."}
+  - {id: billboards_signs, label: "Billboards/Signs", section: physical, row: 68, answer_cell: C68, answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: site_visit, source_of_record: "site visit / photos", jurisdiction_scope: always, default_state: site_visit}
+  - {id: squatters, label: "Squatters", section: physical, row: 69, answer_cell: C69, answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: site_visit, source_of_record: "site visit", jurisdiction_scope: always, default_state: site_visit}
+  - {id: cell_towers, label: "Cell Towers", section: physical, row: 70, answer_cell: C70, answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: site_visit, source_of_record: "site visit / photos", jurisdiction_scope: always, default_state: site_visit}
+  - {id: encroachments, label: "Encroachments (see survey)", section: physical, row: 71, answer_cell: C71, answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: confirmed,
+     fill_method: external_report, source_of_record: "ALTA survey", jurisdiction_scope: always, default_state: verify_external}
+  - {id: power_provider, label: "Power access/provider", section: physical, row: 72, answer_cell: C72,
+     answer_type: text, fill_method: browser_gis, source_of_record: "utility service-area map", jurisdiction_scope: jurisdiction_routed, default_state: verify_browser,
+     guardrail: "Provider is jurisdiction-specific (LADWP vs SCE vs other) — NEVER carry over from an LA template."}
+  - {id: power_will_serve, label: "Will Serve", section: physical, row: 73, answer_cell: C73,
+     answer_type: text, fill_method: external_party, source_of_record: "utility will-serve letter", jurisdiction_scope: jurisdiction_routed, default_state: verify_external}
+  - {id: sewer_provider, label: "Sewer/Sanitation access/provider", section: physical, row: 74, answer_cell: C74,
+     answer_type: text, fill_method: browser_gis, source_of_record: "sanitation service-area map", jurisdiction_scope: jurisdiction_routed, default_state: verify_browser,
+     guardrail: "Collection vs treatment provider can differ; jurisdiction-specific — do not carry over."}
+  - {id: sewer_will_serve, label: "Will Serve", section: physical, row: 75, answer_cell: C75,
+     answer_type: text, fill_method: external_party, source_of_record: "will-serve letter", jurisdiction_scope: jurisdiction_routed, default_state: verify_external}
+  - {id: water_provider, label: "Water access/provider", section: physical, row: 76, answer_cell: C76,
+     answer_type: text, fill_method: browser_gis, source_of_record: "water purveyor service-area map", jurisdiction_scope: jurisdiction_routed, default_state: verify_browser,
+     guardrail: "Water purveyor is jurisdiction-specific — do not carry over."}
+  - {id: water_will_serve, label: "Will Serve", section: physical, row: 77, answer_cell: C77,
+     answer_type: text, fill_method: external_party, source_of_record: "will-serve letter", jurisdiction_scope: jurisdiction_routed, default_state: verify_external}
+
+  # ---------------- Building Characteristics ----------------
+  - {id: unit_count_building, label: "Unit Count", section: building, row: 80, answer_cell: C80,
+     answer_type: computed, formula: "=C14", computed_from: [estimated_unit_count], default_state: computed,
+     guardrail: "Linked to Estimated Unit Count — keep this formula (it auto-reconciles the two unit-count rows)."}
+  - {id: nrsf, label: "NRSF", section: building, row: 81, answer_cell: C81,
+     answer_type: number, unit: sf, fill_method: external_report, source_of_record: "design / yield study", jurisdiction_scope: always, default_state: verify_external}
+  - {id: modular_capable, label: "Modular capable", section: building, row: 82, answer_cell: C82,
+     answer_type: text, fill_method: external_report, source_of_record: "design", jurisdiction_scope: always, default_state: verify_external}
+  - {id: parking, label: "Parking", section: building, row: 83, answer_cell: C83,
+     answer_type: text, fill_method: external_report, source_of_record: "design / code", jurisdiction_scope: jurisdiction_routed, default_state: verify_external}
+  - {id: construction_type, label: "Construction Type", section: building, row: 84, answer_cell: C84,
+     answer_type: text, fill_method: external_report, source_of_record: "design", jurisdiction_scope: always, default_state: verify_external}
+  - {id: planning, label: "Planning:", section: building, row: 85, answer_cell: C85,
+     answer_type: text, fill_method: browser_gis, source_of_record: "local planning; ED1 is LA-City-only", jurisdiction_scope: jurisdiction_routed, default_state: verify_browser,
+     guardrail: "ED1 / ground-floor-retail clearance is LA-City-specific — confirm the local equivalent elsewhere."}
+  - {id: chapter_11b, label: "Chapter 11B:", section: building, row: 86, answer_cell: C86,
+     answer_type: yes_no, allowed_values: ["Yes","No"], allowed_values_status: inferred,
+     fill_method: external_report, source_of_record: "accessibility code review", jurisdiction_scope: always, default_state: verify_external,
+     guardrail: "Cell has no dropdown in the master; Yes/No inferred."}
+
+  # ---------------- Reports (commissioned deliverables) ----------------
+  - {id: geotech_soils, label: "Geotech/Soils", section: reports, row: 89, answer_cell: C89,
+     answer_type: text, fill_method: external_report, source_of_record: "geotech vendor (AGI)", jurisdiction_scope: always, default_state: verify_external}
+  - {id: environmental, label: "Environmental", section: reports, row: 90, answer_cell: C90,
+     answer_type: text, fill_method: external_report, source_of_record: "ESA vendor", jurisdiction_scope: always, default_state: verify_external}
+  - {id: phase_i_esa, label: "Phase I", section: reports, row: 91, answer_cell: C91,
+     answer_type: text, fill_method: external_report, source_of_record: "Phase I ESA vendor", jurisdiction_scope: always, default_state: verify_external}
+  - {id: phase_ii_esa, label: "Phase II", section: reports, row: 92, answer_cell: C92,
+     answer_type: text, fill_method: external_report, source_of_record: "Phase II ESA (conditional on Phase I)", jurisdiction_scope: always, default_state: verify_external}
+  - {id: alta_survey, label: "ALTA Survey", section: reports, row: 93, answer_cell: C93,
+     answer_type: text, fill_method: external_report, source_of_record: "ALTA surveyor", jurisdiction_scope: always, default_state: verify_external,
+     guardrail: "Fixes exact fault line / buildable area — gates land_sf buildable figure."}
+  - {id: dry_utility_report, label: "Dry Utility Report", section: reports, row: 94, answer_cell: C94,
+     answer_type: text, fill_method: external_report, source_of_record: "utility coordination", jurisdiction_scope: jurisdiction_routed, default_state: verify_external}
+  - {id: architectural_yield_study, label: "Architectural Yield Study", section: reports, row: 95, answer_cell: C95,
+     answer_type: text, fill_method: external_report, source_of_record: "architect", jurisdiction_scope: always, default_state: verify_external,
+     guardrail: "Confirms unit yield against buildable area."}
+  - {id: tier_transit_verification, label: "Tier/Transit Verification", section: reports, row: 96, answer_cell: C96,
+     answer_type: text, fill_method: browser_gis, source_of_record: "ZIMAS tier (LA City) / SCAG elsewhere", jurisdiction_scope: la_city_only, default_state: verify_browser,
+     guardrail: "LA-City-specific verification; use SCAG off LA City."}
+  - {id: methane_report, label: "Methane Report", section: reports, row: 97, answer_cell: C97,
+     answer_type: text, fill_method: external_report, source_of_record: "soil-gas/methane vendor", jurisdiction_scope: always, default_state: verify_external,
+     guardrail: "Labeled 'City of LA-specific' in the template, but recommend regardless near oil fields — the hazard is not jurisdiction-bounded."}
+  - {id: litigation_review, label: "Litigation Review", section: reports, row: 98, answer_cell: C98,
+     answer_type: text, fill_method: counsel, source_of_record: "legal counsel", jurisdiction_scope: always, default_state: verify_judgment}
+  - {id: tree_arborist_report, label: "Tree / Arborist Report", section: reports, row: 99, answer_cell: C99,
+     answer_type: text, fill_method: external_report, source_of_record: "arborist (if protected trees)", jurisdiction_scope: jurisdiction_routed, default_state: verify_external}
+  - {id: haul_route, label: "Haul route", section: reports, row: 100, answer_cell: C100,
+     answer_type: text, fill_method: external_report, source_of_record: "civil / local grading review", jurisdiction_scope: jurisdiction_routed, default_state: verify_external}
+
+  # ---------------- Title, Legal, and Records ----------------
+  - {id: preliminary_title_report, label: "Preliminary Title Report", section: title_legal, row: 103, answer_cell: C103,
+     answer_type: text, fill_method: external_party, source_of_record: "title company", jurisdiction_scope: always, default_state: verify_external}
+  - {id: easements, label: "Easements", section: title_legal, row: 104, answer_cell: C104,
+     answer_type: text, fill_method: external_party, source_of_record: "prelim title / ALTA", jurisdiction_scope: always, default_state: verify_external,
+     guardrail: "Note any easements and endorsements needed."}
+  - {id: litigation, label: "Litigation", section: title_legal, row: 105, answer_cell: C105,
+     answer_type: text, fill_method: counsel, source_of_record: "legal counsel", jurisdiction_scope: always, default_state: verify_judgment}
+  - {id: permit_records, label: "Permit Records", section: title_legal, row: 106, answer_cell: C106,
+     answer_type: text, fill_method: external_party, source_of_record: "local building dept records", jurisdiction_scope: jurisdiction_routed, default_state: verify_external}
+
+  # ---------------- Tenant Conditions ----------------
+  - {id: existing_residential_units, label: "Existing residential units (#, beds)", section: tenant, row: 109, answer_cell: C109,
+     answer_type: text, fill_method: desk_om, source_of_record: "OM / leases / site visit", jurisdiction_scope: always, default_state: verify_external,
+     guardrail: "Occupancy drives SB8/SB330 replacement obligations on demolition — confirm occupancy history."}
+  - {id: units_to_vacate_at_coe, label: "# to be vacated at COE", section: tenant, row: 110, answer_cell: C110,
+     answer_type: number, unit: units, fill_method: desk_om, source_of_record: "leases / PSA", jurisdiction_scope: always, default_state: verify_external}
+  - {id: units_rent_stabilized, label: "# rent-stabilized", section: tenant, row: 111, answer_cell: C111,
+     answer_type: number, unit: units, fill_method: desk_om, source_of_record: "local RSO records", jurisdiction_scope: jurisdiction_routed, default_state: verify_external}
+  - {id: units_owner_occupied, label: "# with owner occupancy", section: tenant, row: 112, answer_cell: C112,
+     answer_type: number, unit: units, fill_method: desk_om, source_of_record: "leases / OM", jurisdiction_scope: always, default_state: verify_external}
+  - {id: units_requiring_replacement_sb8, label: "# requiring replacement SB8", section: tenant, row: 113, answer_cell: C113,
+     answer_type: number, unit: units, fill_method: desk_om, source_of_record: "SB8 analysis", jurisdiction_scope: always, default_state: verify_judgment}
+  - {id: commercial_tenants, label: "Commercial tenants", section: tenant, row: 114, answer_cell: C114,
+     answer_type: text, fill_method: desk_om, source_of_record: "leases / OM", jurisdiction_scope: always, default_state: verify_external}
+  - {id: gross_rents_in_place, label: "Gross rents in place", section: tenant, row: 115, answer_cell: C115,
+     answer_type: currency, fill_method: desk_om, source_of_record: "rent roll", jurisdiction_scope: always, default_state: verify_external}
+  - {id: longest_remaining_lease_expiry, label: "Longest remaining lease expiry", section: tenant, row: 116, answer_cell: C116,
+     answer_type: date, fill_method: desk_om, source_of_record: "rent roll / leases", jurisdiction_scope: always, default_state: verify_external}
+  - {id: sb8, label: "SB8", section: tenant, row: 117, answer_cell: C117,
+     answer_type: text, fill_method: desk_om, source_of_record: "SB8/SB330 analysis", jurisdiction_scope: always, default_state: verify_judgment,
+     guardrail: "Replacement-unit obligation if occupied units are demolished."}
+
+lookups:
+  cdlac_region_by_county:
+    location: "Sheet1!B3:C60"
+    note: "58-county County->CDLAC Region table. Feeds geographic_pool. 'Los Angeles' = City of LA if within city limits, else Balance of LA County."
+
+# ---------------------------------------------------------------------
+# KNOWN TEMPLATE DEFECTS (structural, not deal data) — for senior review:
+#   1. revenue_classification menu: 'Workforce, LIHTC' comma-joined (renders as
+#      two items) and leading space on ' LIHTC'. Confirm intended options + fix.
+#   2. methane menu: leading spaces on ' Methane Buffer Zone' / ' Methane Zone'.
+#   3. very_high_fire_hazard_zone: Yes/No cannot represent a 'Moderate' tier the
+#      source actually returns — consider enum_tier.
+#   4. Stray Yes/No data-validation on blank spacer rows C20 and C30 (no label).
+#   5. Section 'Feedback from last Deal Review' (row 119) + '[Date]' rows 121-124:
+#      unclear whether scaffolding or leftover — confirm.
+# These are tracked here because they are properties of the FIELD/template, not
+# per-property answers. The prior-deal answer values are in the scrub inventory.
+# ---------------------------------------------------------------------
