@@ -19,12 +19,28 @@ COORD = "https://geocoding.geo.census.gov/geocoder/geographies/coordinates"
 BENCHMARK, VINTAGE = "Public_AR_Current", "Current_Current"
 
 
+def _get_json(url, timeout=30, tries=3):
+    """GET + parse JSON with a small retry — the Census geocoder is the keystone
+    and intermittently 502s/resets, which should not fail the whole run."""
+    import time
+    last = None
+    for i in range(tries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (solaDD)"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.load(r)
+        except Exception as e:
+            last = e
+            if i < tries - 1:
+                time.sleep(1.5 * (i + 1))
+    raise RuntimeError(f"census geocoder failed after {tries} tries: {last}")
+
+
 def geocode(address: str, timeout: int = 30) -> dict:
     q = urllib.parse.urlencode(
         {"address": address, "benchmark": BENCHMARK, "vintage": VINTAGE, "format": "json"}
     )
-    with urllib.request.urlopen(f"{BASE}?{q}", timeout=timeout) as r:
-        data = json.load(r)
+    data = _get_json(f"{BASE}?{q}", timeout)
     matches = data.get("result", {}).get("addressMatches", [])
     if not matches:
         raise LookupError(f"no geocoder match for {address!r}")
@@ -45,8 +61,7 @@ def geocode_point(lon: float, lat: float, timeout: int = 30) -> dict:
     q = urllib.parse.urlencode(
         {"x": lon, "y": lat, "benchmark": BENCHMARK, "vintage": VINTAGE, "format": "json"}
     )
-    with urllib.request.urlopen(f"{COORD}?{q}", timeout=timeout) as r:
-        data = json.load(r)
+    data = _get_json(f"{COORD}?{q}", timeout)
     tracts = data.get("result", {}).get("geographies", {}).get("Census Tracts", [])
     if not tracts:
         raise LookupError(f"no census tract for point ({lat},{lon})")
