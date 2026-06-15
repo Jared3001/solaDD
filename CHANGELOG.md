@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.8.1-draft (2026-06-15)
+- Street View logged as an ACTIVATE-LATER feature and DEACTIVATED: streetview.py
+  gains an `ENABLED = False` switch (functions raise while off; have_key() returns
+  False even if a key is present), and it stays unimported by collect.py. New
+  ACTIVATE_LATER.md documents the GOOGLE_MAPS_API_KEY path + the 3-step activation;
+  README points to it.
+
 ## v0.8-draft (2026-06-15)
 - 16 more fields automated (~40 readers total):
   - 3 "free wins" (jurisdiction.py): address, apn, city_jurisdiction (the schema's

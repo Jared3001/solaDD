@@ -25,12 +25,26 @@ META = "https://maps.googleapis.com/maps/api/streetview/metadata"
 IMG = "https://maps.googleapis.com/maps/api/streetview"
 HEADINGS = (0, 90, 180, 270)
 
+# ---------------------------------------------------------------------------
+# ACTIVATE-LATER FEATURE — CURRENTLY DEACTIVATED.  (see ACTIVATE_LATER.md)
+# This module is dormant: ENABLED is False AND it is not imported by collect.py.
+# To activate when the Google Maps API key is available:
+#   1) export GOOGLE_MAPS_API_KEY=<key>
+#   2) set ENABLED = True   (below)
+#   3) wire the desired hook into collect.py (it lands site-visit AIDS, not VERIFIED)
+# ---------------------------------------------------------------------------
+ENABLED = False
+
 
 def have_key():
-    return bool(os.environ.get(KEY_ENV))
+    """True only when the feature is activated AND a key is present."""
+    return ENABLED and bool(os.environ.get(KEY_ENV))
 
 
 def _key():
+    if not ENABLED:
+        raise LookupError("Street View is a DEACTIVATED activate-later feature "
+                          "(see ACTIVATE_LATER.md; set streetview.ENABLED=True to activate).")
     k = os.environ.get(KEY_ENV)
     if not k:
         raise LookupError(f"Street View needs {KEY_ENV} (set it to enable)")
@@ -67,7 +81,8 @@ if __name__ == "__main__":
     import sys
     from geocoder import geocode
     if not have_key():
-        print(f"Set {KEY_ENV} to use Street View. (module is key-ready; not wired into collect yet)")
+        print("Street View is a DEACTIVATED activate-later feature (see ACTIVATE_LATER.md).")
+        print(f"To activate: set ENABLED=True and export {KEY_ENV}. ENABLED is currently", ENABLED)
         sys.exit(0)
     g = geocode(" ".join(sys.argv[1:]) or "4201 Pico Blvd, Los Angeles, CA")
     print(json.dumps(fetch(g, "build/_streetview_demo"), indent=2))

@@ -39,6 +39,11 @@ sheets predate it.
 ## Not done by automation (people produce these)
 Will-serve letters, ESA/geotech/ALTA/yield reports, title, counsel — tracked, not produced.
 
+## Activate-later features (built, intentionally OFF)
+See **ACTIVATE_LATER.md**. Currently: the **Street View pre-screen** (needs a
+`GOOGLE_MAPS_API_KEY`) is **deactivated** — `streetview.ENABLED = False` and it is
+not wired into `collect.py`.
+
 ## Setup (you do this — requires your GitHub credentials)
 ```
 git remote add origin <your-repo-url>
