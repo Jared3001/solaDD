@@ -36,6 +36,7 @@
       <div class="tabs" role="tablist">
         <button class="tab active" data-mode="single" role="tab">Single address</button>
         <button class="tab" data-mode="assemblage" role="tab">Block assemblage (APNs)</button>
+        <button class="tab" data-mode="sources" role="tab">Sources</button>
       </div>
 
       <form id="run-form">
@@ -43,14 +44,14 @@
           <label for="address">Property address</label>
           <input type="text" id="address" name="address"
                  placeholder="11300 S Main St, Los Angeles, CA 90061" autocomplete="off">
-          <p class="hint">Any California address. Runs ~40 automated readers (~10s). LA-City parcels also get the ZIMAS zoning/hazard block.</p>
+          <p class="hint">Any California address. Runs ~40 automated readers (~10s). City of LA (ZIMAS) and City of San Diego parcels also get the full local zoning/hazard block; other cities route to manual.</p>
         </div>
 
         <div class="field hidden" data-for="assemblage">
           <label for="apns">APN list</label>
           <textarea id="apns" name="apns" rows="4"
                     placeholder="5082-024-018&#10;5082-024-019&#10;5082-024-020"></textarea>
-          <p class="hint">One APN per line (or comma-separated). LA City parcels only. Sums combined land area and aggregates every designation across the block (~18s).</p>
+          <p class="hint">One APN per line (or comma-separated). LA City or San Diego County parcels (auto-detected). Sums combined land area and aggregates every designation across the block (~18s).</p>
         </div>
 
         <button type="submit" id="run-btn" class="run-btn">Run feasibility</button>
@@ -58,28 +59,76 @@
       </form>
     </section>
 
-    <section id="status-panel" class="panel hidden">
-      <div class="status-head">
-        <div>
-          <p class="phase" id="phase">Starting…</p>
-          <p class="matched" id="matched"></p>
+    <div id="run-extras">
+      <section id="status-panel" class="panel hidden">
+        <div class="status-head">
+          <div>
+            <p class="phase" id="phase">Starting…</p>
+            <p class="matched" id="matched"></p>
+          </div>
+          <a id="download" class="download-btn hidden" href="#">Download .xlsx</a>
         </div>
-        <a id="download" class="download-btn hidden" href="#">Download .xlsx</a>
+        <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
+        <p class="counts" id="counts"></p>
+        <div id="parcels" class="parcels hidden"></div>
+      </section>
+
+      <section id="results" class="results"></section>
+
+      <section id="recent-panel" class="panel hidden">
+        <h2 class="recent-head">Recent runs</h2>
+        <p class="hint">Re-download a completed checklist without re-running. Cleared on redeploy.</p>
+        <table class="recent-table">
+          <thead><tr><th>Site</th><th>Type</th><th>Fields</th><th>When</th><th></th></tr></thead>
+          <tbody id="recent-body"></tbody>
+        </table>
+      </section>
+    </div>
+
+    <section id="sources-panel" class="panel hidden">
+      <h2 class="recent-head">Where each answer comes from</h2>
+      <p class="hint">Every automated field is sourced at one of three levels. Federal and statewide sources are
+        identical anywhere in California; local sources vary by jurisdiction.</p>
+
+      {% for tier in sources.tiers %}
+      <div class="src-tier">
+        <div class="src-tier-head">
+          <span class="level-badge level-{{ tier.key }}">{{ tier.label }}</span>
+          <span class="src-tier-blurb">{{ tier.blurb }}</span>
+        </div>
+        <table class="src-table">
+          <thead><tr><th>Source</th><th>Dataset</th><th>Answers</th></tr></thead>
+          <tbody>
+            {% for g in tier.groups %}
+            <tr>
+              <td class="src-name">{{ g.source }}</td>
+              <td class="src-detail">{{ g.detail }}</td>
+              <td>{{ g.fields | join(", ") }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
-      <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
-      <p class="counts" id="counts"></p>
-      <div id="parcels" class="parcels hidden"></div>
-    </section>
+      {% endfor %}
 
-    <section id="results" class="results"></section>
-
-    <section id="recent-panel" class="panel hidden">
-      <h2 class="recent-head">Recent runs</h2>
-      <p class="hint">Re-download a completed checklist without re-running. Cleared on redeploy.</p>
-      <table class="recent-table">
-        <thead><tr><th>Site</th><th>Type</th><th>Fields</th><th>When</th><th></th></tr></thead>
-        <tbody id="recent-body"></tbody>
-      </table>
+      <div class="src-tier">
+        <div class="src-tier-head">
+          <span class="level-badge level-local">{{ sources.local.label }}</span>
+          <span class="src-tier-blurb">{{ sources.local.blurb }}</span>
+        </div>
+        <table class="src-table src-local">
+          <thead><tr>{% for c in sources.local.cols %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+          <tbody>
+            {% for r in sources.local.rows %}
+            <tr>
+              <td class="src-name">{{ r.field }}</td>
+              <td>{{ r.la }}</td>
+              <td class="{{ 'src-na' if 'N/A' in r.sd else '' }}">{{ r.sd }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </section>
   </main>
 

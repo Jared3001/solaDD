@@ -71,7 +71,7 @@ def logout():
 @app.get("/")
 @login_required
 def index():
-    return render_template("index.html", sections=jobs.SECTIONS)
+    return render_template("index.html", sections=jobs.SECTIONS, sources=jobs.SOURCE_CATALOG)
 
 
 @app.post("/api/run")

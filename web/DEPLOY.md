@@ -54,6 +54,10 @@ Open http://127.0.0.1:8000, sign in with `APP_PASSWORD`.
   on redeploy unless `DATA_DIR` is a persistent volume.
 - **Health dot** — top-right indicator that pings `/healthz` every 30s
   (green Online / red Offline).
+- **Sources tab** — reference breakdown of where every automated answer comes
+  from, grouped by level (federal/national, California statewide, local/
+  jurisdictional). The local table shows the Los Angeles vs San Diego source for
+  each field. Static content from `jobs.SOURCE_CATALOG`.
 
 ## Notes / limits
 

@@ -65,6 +65,80 @@ _schema = yaml.safe_load((ROOT / "canonical" / "schema.yaml").read_text())
 FIELD_BY_ID = {f["id"]: f for f in _schema["fields"]}
 SECTIONS = [{"id": s["id"], "label": s["label"]} for s in _schema["sections"]]
 
+# --------------------------------------------------------------------------- #
+# Source catalog — what each automated answer is sourced from, by level.
+# Reference content for the "Sources" tab. Three levels: federal/national (any
+# US/CA location), California statewide (any CA parcel), and local/jurisdictional
+# (varies by city & county — active: City of LA, City of San Diego + county
+# parcels). Mirrors the reader registries in build/collect.py + the San Diego
+# expansion (see SAN_DIEGO_EXPANSION.md).
+# --------------------------------------------------------------------------- #
+SOURCE_CATALOG = {
+    "tiers": [
+        {
+            "key": "federal", "label": "Federal / national",
+            "blurb": "Keyed off census tract, ZIP, or lat/long — identical answer anywhere in the U.S. No jurisdiction routing.",
+            "groups": [
+                {"source": "U.S. Census Bureau", "detail": "Geocoder + Incorporated Places",
+                 "fields": ["Address (matched)", "County", "City / jurisdiction"]},
+                {"source": "HUD", "detail": "QCT/DDA + Public Housing Authority layers",
+                 "fields": ["Qualified Census Tract (QCT)", "Difficult Development Area (DDA)", "Public Housing Authority (PHA)"]},
+                {"source": "FEMA", "detail": "National Flood Hazard Layer (NFHL)",
+                 "fields": ["Flood zone"]},
+                {"source": "U.S. Treasury / CDFI Fund", "detail": "Opportunity Zone designations",
+                 "fields": ["Opportunity Zone"]},
+                {"source": "USGS", "detail": "3DEP / EPQS elevation",
+                 "fields": ["Slope grade"]},
+                {"source": "FCC / HIFLD", "detail": "Cellular tower registry",
+                 "fields": ["Cell towers"]},
+                {"source": "OpenStreetMap", "detail": "Overpass — open community data",
+                 "fields": ["Nearest bus stop, grocery, park, clinic, library, pharmacy, school & qualifying transit"]},
+            ],
+        },
+        {
+            "key": "state", "label": "California — statewide",
+            "blurb": "State agency datasets covering every CA parcel — these port across counties unchanged.",
+            "groups": [
+                {"source": "CTCAC / HCD", "detail": "Opportunity & AFFH maps (statewide, all 58 counties)",
+                 "fields": ["Resource area", "Neighborhood change area"]},
+                {"source": "CDLAC", "detail": "Geographic region lookup",
+                 "fields": ["Geographic pool (region)"]},
+                {"source": "CAL FIRE / OSFM", "detail": "Fire Hazard Severity Zones",
+                 "fields": ["Very high fire hazard zone"]},
+                {"source": "CA Coastal Commission / Caltrans", "detail": "Coastal Zone boundary",
+                 "fields": ["Coastal zone"]},
+                {"source": "CalGEM", "detail": "WellSTAR oil & gas wells",
+                 "fields": ["Wells on site"]},
+                {"source": "California Geological Survey", "detail": "EQ Zapp seismic hazard zones",
+                 "fields": ["Liquefaction zone", "Alquist-Priolo fault zone"]},
+                {"source": "SWRCB GeoTracker", "detail": "UST/LUST cleanup sites (EPA fallback)",
+                 "fields": ["Underground storage tanks"]},
+            ],
+        },
+    ],
+    "local": {
+        "label": "Local / jurisdictional",
+        "blurb": ("Zoning, parcel and entitlement data come from each jurisdiction's own GIS, so the source "
+                  "varies by city & county. Active: City of Los Angeles and City of San Diego (plus county "
+                  "parcel layers). Parcels in other cities route to manual review."),
+        "cols": ["Field", "Los Angeles", "San Diego"],
+        "rows": [
+            {"field": "APN / parcel ID", "la": "LA City / County Parcels", "sd": "SANDAG County Parcels"},
+            {"field": "Land area (SF)", "la": "LA City / County Parcels (EPSG:2229)", "sd": "SANDAG County Parcels (EPSG:2230)"},
+            {"field": "Zoning", "la": "ZIMAS / NavigateLA", "sd": "City of San Diego — Base Zones"},
+            {"field": "Specific plan / overlay", "la": "ZIMAS / NavigateLA", "sd": "City of San Diego — DSD Zoning Overlay"},
+            {"field": "Council / supervisor district", "la": "ZIMAS / NavigateLA", "sd": "City of San Diego — DoIT public layers"},
+            {"field": "Historic status", "la": "ZIMAS / SurveyLA", "sd": "City of San Diego — Historic Preservation"},
+            {"field": "TOC / transit tier", "la": "LA City Planning — TOC", "sd": "SD Transit Priority Area"},
+            {"field": "½-mile major transit", "la": "LA City Planning", "sd": "SD Transit Priority Area (SB 743)"},
+            {"field": "Airport hazard zone", "la": "LA County ALUC (A-NET)", "sd": "City of San Diego — DSD Airports (ALUC)"},
+            {"field": "Q conditions", "la": "ZIMAS / NavigateLA", "sd": "N/A — LA-only zoning concept"},
+            {"field": "Methane hazard zone", "la": "ZIMAS / NavigateLA", "sd": "N/A — LA-only zoning concept"},
+            {"field": "Transitional height", "la": "Derived (LAMC)", "sd": "N/A — LA-only zoning concept"},
+        ],
+    },
+}
+
 MAX_JOBS = 50                          # keep the most recent N; prune older + their files
 _jobs = {}
 _lock = threading.Lock()

@@ -14,9 +14,16 @@ document.querySelectorAll(".tab").forEach(tab => {
   tab.addEventListener("click", () => {
     mode = tab.dataset.mode;
     document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t === tab));
-    document.querySelectorAll("[data-for]").forEach(f => {
-      f.classList.toggle("hidden", f.dataset.for !== mode);
-    });
+    const isSources = mode === "sources";
+    // Sources is a reference view — swap the run UI for the catalog.
+    $("#run-form").classList.toggle("hidden", isSources);
+    $("#run-extras").classList.toggle("hidden", isSources);
+    $("#sources-panel").classList.toggle("hidden", !isSources);
+    if (!isSources) {
+      document.querySelectorAll("[data-for]").forEach(f => {
+        f.classList.toggle("hidden", f.dataset.for !== mode);
+      });
+    }
   });
 });
 

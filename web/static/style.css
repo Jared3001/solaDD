@@ -216,4 +216,29 @@ h1, .brand-mark, .tab, .run-btn, label, th, .phase, .kicker {
   background: #f7e3e1; color: #7a241f; border: 1px solid #e3b3ad;
   padding: 10px 12px; border-radius: 6px; font-size: 14px; margin: 14px 0 0;
 }
+
+/* ---------- sources tab ---------- */
+.src-tier { margin-top: 22px; }
+.src-tier-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.level-badge {
+  display: inline-block; padding: 3px 10px; border-radius: 999px;
+  font-family: "Archivo", sans-serif; font-weight: 800; font-size: 11px;
+  letter-spacing: .04em; text-transform: uppercase; color: #fff; white-space: nowrap;
+}
+.level-federal { background: var(--navy); }
+.level-state   { background: var(--mid); }
+.level-local   { background: var(--amber); color: var(--ink); }
+.src-tier-blurb { color: var(--gray); font-size: 13px; flex: 1; min-width: 240px; }
+
+.src-table { width: 100%; border-collapse: collapse; }
+.src-table th {
+  text-align: left; font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--gray); border-bottom: 1px solid var(--line); padding: 6px 10px;
+}
+.src-table td { padding: 8px 10px; border-bottom: 1px solid #efe9dd; font-size: 14px; vertical-align: top; }
+.src-name { font-weight: 600; color: var(--navy); white-space: nowrap; }
+.src-detail { color: var(--gray); font-size: 13px; }
+.src-local td { width: 33%; }
+.src-na { color: var(--na); font-style: italic; }
+
 .hidden { display: none !important; }
