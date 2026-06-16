@@ -66,6 +66,8 @@ function poll(jobId) {
       clearInterval(pollTimer);
       setRunning(false);
       if (job.status === "error") showError(job.error || "The run failed.");
+      loadStats();
+      loadRecent();
     }
   };
   tick();
@@ -166,3 +168,58 @@ function esc(v) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 function fmt(n) { return Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 }); }
+
+// ---------- time-saved metric ----------
+async function loadStats() {
+  try {
+    const r = await fetch("/api/stats");
+    if (!r.ok) return;
+    const s = await r.json();
+    $("#hours-saved").textContent = fmt(s.hours_saved);
+    $("#total-automated").textContent = fmt(s.total_automated);
+    $("#per-min").textContent = s.minutes_per;
+  } catch (_) { /* leave placeholders */ }
+}
+
+// ---------- recent runs ----------
+async function loadRecent() {
+  try {
+    const r = await fetch("/api/recent");
+    if (!r.ok) return;
+    const { runs } = await r.json();
+    const panel = $("#recent-panel");
+    if (!runs.length) { panel.classList.add("hidden"); return; }
+    panel.classList.remove("hidden");
+    $("#recent-body").innerHTML = runs.map(run => `
+      <tr>
+        <td class="rc-site">${esc(run.label)}</td>
+        <td>${run.kind === "assemblage" ? "Assemblage" : "Single"}</td>
+        <td>${run.fields}${run.flags ? ` <span class="rc-flag" title="${run.flags} field(s) need manual verification">⚑ ${run.flags}</span>` : ""}</td>
+        <td class="rc-when">${esc((run.finished || "").replace("T", " "))}</td>
+        <td>${run.downloadable ? `<a class="rc-dl" href="/api/download/${run.id}">Download</a>` : ""}</td>
+      </tr>`).join("");
+  } catch (_) { /* ignore */ }
+}
+
+// ---------- health dot ----------
+async function checkHealth() {
+  const el = $("#health");
+  try {
+    const r = await fetch("/healthz", { cache: "no-store" });
+    const ok = r.ok;
+    el.classList.toggle("up", ok);
+    el.classList.toggle("down", !ok);
+    el.querySelector(".health-label").textContent = ok ? "Online" : "Degraded";
+    el.title = ok ? "Service healthy" : "Health check failed";
+  } catch (_) {
+    el.classList.remove("up"); el.classList.add("down");
+    el.querySelector(".health-label").textContent = "Offline";
+    el.title = "Cannot reach the server";
+  }
+}
+
+// ---------- boot ----------
+loadStats();
+loadRecent();
+checkHealth();
+setInterval(checkHealth, 30000);

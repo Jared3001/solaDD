@@ -31,10 +31,29 @@ Open http://127.0.0.1:8000, sign in with `APP_PASSWORD`.
    - `APP_PASSWORD` — the shared team password.
    - `SECRET_KEY` — any long random string (signs the login cookie; set a
      stable value so sessions survive restarts).
+   - *(optional)* `STARTING_CHECKLISTS` — sites already automated before the
+     app started counting (default `9`). The time-saved metric =
+     `(STARTING_CHECKLISTS + runs) × MINUTES_PER_CHECKLIST`.
+   - *(optional)* `MINUTES_PER_CHECKLIST` — minutes saved per checklist (default `30`).
+   - *(optional)* `DATA_DIR` — where filled workbooks + the run counter live.
+     Defaults to a temp dir, which resets on every redeploy. Point it at a
+     **mounted Railway volume** if you want the time-saved counter and recent
+     runs to persist across deploys.
 5. **Settings → Networking → Generate Domain** to get the team URL.
-6. Every push to the connected branch redeploys automatically.
+6. **Settings → Healthcheck Path:** `/healthz` (returns plain `200`).
+7. Every push to the connected branch redeploys automatically.
 
 `$PORT` is provided by Railway and consumed by the `Procfile` start command.
+
+## What's on the page
+
+- **Time saved** — a banner at the top: `(9 + completed runs) × 30 min`,
+  shown in hours. Tune via the env vars above.
+- **Recent runs** — the last 10 completed checklists with a re-download link,
+  so the team can grab an earlier result without re-running. In-memory; cleared
+  on redeploy unless `DATA_DIR` is a persistent volume.
+- **Health dot** — top-right indicator that pings `/healthz` every 30s
+  (green Online / red Offline).
 
 ## Notes / limits
 

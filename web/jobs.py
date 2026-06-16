@@ -14,7 +14,9 @@ Jobs run in daemon threads and live in an in-memory store, so the app MUST run
 as a single gunicorn worker (see Procfile). Filled workbooks are written to a
 temp dir and served by /api/download.
 """
+import os
 import sys
+import json
 import uuid
 import shutil
 import tempfile
@@ -43,8 +45,20 @@ import zimas
 import nc
 
 TEMPLATE = ROOT / "template" / "Checklist_BLANK_master.xlsx"
-RUN_DIR = Path(tempfile.gettempdir()) / "sola_dd_runs"
-RUN_DIR.mkdir(exist_ok=True)
+
+# Filled workbooks + the persistent counter live in DATA_DIR. Defaults to a
+# temp dir (resets on a Railway redeploy); point DATA_DIR at a mounted volume
+# for a counter that survives deploys.
+DATA_DIR = Path(os.environ.get("DATA_DIR") or (Path(tempfile.gettempdir()) / "sola_dd_runs"))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+RUN_DIR = DATA_DIR
+COUNTER_FILE = DATA_DIR / "counter.json"
+
+# Time-saved metric. STARTING_CHECKLISTS = sites already automated before the
+# app started counting; each automated checklist saves MINUTES_PER_CHECKLIST.
+STARTING_CHECKLISTS = int(os.environ.get("STARTING_CHECKLISTS", "9"))
+MINUTES_PER_CHECKLIST = int(os.environ.get("MINUTES_PER_CHECKLIST", "30"))
+_counter_lock = threading.Lock()
 
 # Schema metadata for labelling / grouping results in the UI.
 _schema = yaml.safe_load((ROOT / "canonical" / "schema.yaml").read_text())
@@ -110,6 +124,7 @@ def run_single(job):
         "matched_address": geo["matched_address"], "geoid": geo["geoid"],
         "lat": round(geo["lat"], 6), "lon": round(geo["lon"], 6),
     }
+    job["label"] = geo["matched_address"]
 
     active = dict(_collect.READERS)
     in_la = False
@@ -200,6 +215,56 @@ def _safe_name(s):
     return ("_".join(keep.split()) or "site")[:80]
 
 
+# --------------------------------------------------------------------------- #
+# time-saved counter (persisted) + stats
+# --------------------------------------------------------------------------- #
+def _read_count():
+    try:
+        return int(json.loads(COUNTER_FILE.read_text()).get("count", 0))
+    except Exception:
+        return 0
+
+
+def _bump_count():
+    with _counter_lock:
+        n = _read_count() + 1
+        try:
+            COUNTER_FILE.write_text(json.dumps({"count": n}))
+        except Exception:
+            traceback.print_exc()
+        return n
+
+
+def stats():
+    runs = _read_count()
+    total = STARTING_CHECKLISTS + runs
+    minutes = total * MINUTES_PER_CHECKLIST
+    return {
+        "app_runs": runs, "starting": STARTING_CHECKLISTS,
+        "total_automated": total, "minutes_per": MINUTES_PER_CHECKLIST,
+        "minutes_saved": minutes, "hours_saved": round(minutes / 60, 1),
+    }
+
+
+def recent_jobs(n=10):
+    """Most recent completed runs, newest first, for the re-download list."""
+    with _lock:
+        done = [j for j in _jobs.values() if j["status"] == "done"]
+    done.sort(key=lambda j: j.get("finished") or "", reverse=True)
+    out = []
+    for j in done[:n]:
+        with j["_lock"]:
+            states = [f["state"] for f in j["fields"].values()]
+        flags = sum(1 for s in states
+                    if s.startswith("TOOL-FAIL") or s == "MANUAL-VERIFY")
+        out.append({
+            "id": j["id"], "kind": j["kind"], "label": j.get("label") or j["id"],
+            "finished": j.get("finished"), "fields": len(states), "flags": flags,
+            "downloadable": bool(j.get("file")),
+        })
+    return out
+
+
 def _prune():
     """Evict oldest jobs (and their files) beyond MAX_JOBS. Caller holds _lock."""
     if len(_jobs) <= MAX_JOBS:
@@ -215,8 +280,9 @@ def _prune():
 
 def create_job(kind, payload):
     jid = uuid.uuid4().hex[:12]
+    label = payload.get("address") or ", ".join(payload.get("apns", [])) or jid
     job = {
-        "id": jid, "kind": kind, "status": "running", "input": payload,
+        "id": jid, "kind": kind, "status": "running", "input": payload, "label": label,
         "geo": None, "in_la_city": None, "phase": "Starting…",
         "total": 0, "completed": 0, "fields": {},
         "parcels": None, "combined_sf": None,
@@ -235,6 +301,7 @@ def _run(job):
     try:
         run_single(job) if job["kind"] == "single" else run_assemblage(job)
         job["status"] = "done"
+        _bump_count()                  # one completed checklist = MINUTES_PER_CHECKLIST saved
     except Exception as e:
         traceback.print_exc()
         job["status"] = "error"

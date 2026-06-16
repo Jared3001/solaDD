@@ -97,6 +97,18 @@ def api_run():
     return jsonify({"error": "Unknown mode."}), 400
 
 
+@app.get("/api/stats")
+@login_required
+def api_stats():
+    return jsonify(jobs.stats())
+
+
+@app.get("/api/recent")
+@login_required
+def api_recent():
+    return jsonify({"runs": jobs.recent_jobs(10)})
+
+
 @app.get("/api/job/<jid>")
 @login_required
 def api_job(jid):
@@ -118,6 +130,7 @@ def api_download(jid):
 
 @app.get("/healthz")
 def healthz():
+    # Plain 200 for uptime monitors (UptimeRobot, Railway healthcheck, etc.).
     return "ok", 200
 
 

@@ -16,10 +16,22 @@
       <span class="brand-sep">/</span>
       <span class="brand-title">Site DD Feasibility</span>
     </div>
-    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+    <div class="topbar-right">
+      <span id="health" class="health" title="Checking…"><span class="dot"></span><span class="health-label">…</span></span>
+      <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+    </div>
   </header>
 
   <main class="wrap">
+    <section class="metric" id="metric">
+      <div class="metric-big"><span id="hours-saved">—</span><span class="metric-unit">hrs saved</span></div>
+      <div class="metric-sub">
+        <span id="total-automated">—</span> site checklists automated
+        <span class="metric-dot">·</span>
+        <span id="per-min">30</span> min saved each
+      </div>
+    </section>
+
     <section class="panel">
       <div class="tabs" role="tablist">
         <button class="tab active" data-mode="single" role="tab">Single address</button>
@@ -60,6 +72,15 @@
     </section>
 
     <section id="results" class="results"></section>
+
+    <section id="recent-panel" class="panel hidden">
+      <h2 class="recent-head">Recent runs</h2>
+      <p class="hint">Re-download a completed checklist without re-running. Cleared on redeploy.</p>
+      <table class="recent-table">
+        <thead><tr><th>Site</th><th>Type</th><th>Fields</th><th>When</th><th></th></tr></thead>
+        <tbody id="recent-body"></tbody>
+      </table>
+    </section>
   </main>
 
   <script>window.SECTIONS = {{ sections | tojson }};</script>
