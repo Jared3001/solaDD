@@ -26,10 +26,11 @@ import traceback
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-ROOT = Path(__file__).resolve().parent.parent          # repo root (web/ -> root)
+WEB = Path(__file__).resolve().parent                  # web/
+ROOT = WEB.parent                                      # repo root (web/ -> root)
 BUILD = ROOT / "build"
 SOURCES = BUILD / "sources"
-for _p in (str(BUILD), str(SOURCES)):                  # make build/ + build/sources/ importable
+for _p in (str(WEB), str(BUILD), str(SOURCES)):        # make web/ + build/ + build/sources/ importable
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
@@ -175,6 +176,103 @@ def _record(job, fid, answer, state, notes):
 
 
 # --------------------------------------------------------------------------- #
+# OM reconciliation — default to the OM; switch to a DD answer only when the DD
+# process produced a different, cited value (then flag the discrepancy).
+# --------------------------------------------------------------------------- #
+import re as _re
+
+
+def _digits(s):
+    return _re.sub(r"\D", "", str(s or ""))
+
+
+def _num(s):
+    m = _re.search(r"-?\d[\d,]*(?:\.\d+)?", str(s or ""))
+    return float(m.group(0).replace(",", "")) if m else None
+
+
+def _values_agree(fid, om_val, dd_val):
+    """Loose agreement test between an OM value and a DD reader value, by field type."""
+    if dd_val is None:
+        return False
+    if fid == "land_sf":
+        a, b = _num(om_val), _num(dd_val)
+        if a is None or b is None:
+            return False
+        return abs(a - b) <= max(300.0, 0.02 * max(a, b))      # within 2% or 300 sf
+    if fid == "apn":
+        return _digits(om_val) == _digits(dd_val) and bool(_digits(om_val))
+    if fid == "address":
+        on, dn = _digits(om_val.split()[0] if om_val else ""), _digits(dd_val.split()[0] if dd_val else "")
+        return bool(on) and on == dn                            # same house number = good enough
+    if fid in ("county", "city_jurisdiction"):
+        a, b = str(om_val).lower(), str(dd_val).lower()
+        return a in b or b in a
+    return str(om_val).strip().lower() == str(dd_val).strip().lower()
+
+
+def _mutate_field(job, fid, **changes):
+    with job["_lock"]:
+        if fid in job["fields"]:
+            job["fields"][fid].update(changes)
+
+
+def _apply_om_merge(job, om_fields, ws, outcomes):
+    """Reconcile extracted OM values against DD outcomes and write them to the workbook.
+
+    Rule: default to the OM. When a DD reader produced a value too, the DD answer
+    wins on a real conflict (it has a cited source) and the cell is flagged
+    JUDGMENT; on agreement the DD VERIFIED value stands with an 'OM agrees' note.
+    Where DD has no value (no reader, or it failed), the OM value fills the cell
+    as OM-SOURCED."""
+    def put(row, col, val):
+        ws.cell(row, col, val)
+
+    def append_note(row, text):
+        prev = ws.cell(row, 5).value
+        ws.cell(row, 5, (prev + " | " if prev else "") + text)
+        return ws.cell(row, 5).value
+
+    merged = []
+    for f in om_fields:
+        fid = f["field_id"]
+        field = FIELD_BY_ID.get(fid)
+        if not field:
+            continue
+        row = int(field["answer_cell"][1:])
+        omv, q, conf = f["value"], f["source_quote"], f["confidence"]
+        dd = outcomes.get(fid)
+        dd_ok = bool(dd) and dd[0] == "ok"
+        dd_val = dd[1].get("answer") if dd_ok else None
+
+        if dd_ok and _values_agree(fid, omv, dd_val):
+            note = f'OM agrees ({conf}): "{omv}". OM source: "{q}".'
+            full = append_note(row, note)
+            _mutate_field(job, fid, notes=full, om="agree")
+            merged.append({**f, "outcome": "agree", "dd_value": _jsonable(dd_val)})
+        elif dd_ok:
+            note = (f'CONFLICT — OM stated "{omv}" but DD (cited) found "{dd_val}"; DD value used. '
+                    f'OM source: "{q}".')
+            ws.cell(row, 1, "JUDGMENT")
+            full = append_note(row, note)
+            _mutate_field(job, fid, state="JUDGMENT", notes=full, om="conflict")
+            merged.append({**f, "outcome": "conflict", "dd_value": _jsonable(dd_val)})
+        else:
+            reason = "no DD source for this field" if dd is None else "DD reader failed"
+            note = f'From OM ({conf} confidence) — {reason}, OM value used. Source: "{q}".'
+            put(row, 1, "OM-SOURCED")
+            put(row, 3, omv)
+            ws.cell(row, 5, note)
+            label, section = _field_meta(fid)
+            with job["_lock"]:
+                job["fields"][fid] = {"id": fid, "label": label, "section": section,
+                                      "answer": _jsonable(omv), "state": "OM-SOURCED",
+                                      "notes": note, "om": "sourced"}
+            merged.append({**f, "outcome": "om-sourced", "dd_value": None})
+    return merged
+
+
+# --------------------------------------------------------------------------- #
 # single address
 # --------------------------------------------------------------------------- #
 def _display_outcome(outcome):
@@ -192,7 +290,24 @@ def _display_outcome(outcome):
 
 
 def run_single(job):
-    address = job["input"]["address"]
+    # OM (optional) — extract deal facts first; an uploaded OM can also supply the address.
+    om_fields = []
+    if job["input"].get("om_bytes"):
+        job["phase"] = "Reading the Offering Memorandum with Claude…"
+        try:
+            import om_extract
+            om_fields = om_extract.extract(job["input"]["om_bytes"],
+                                           job["input"].get("om_name") or "om.pdf")
+            job["om"] = {"name": job["input"].get("om_name"), "extracted": om_fields, "error": None}
+        except Exception as e:
+            job["om"] = {"name": job["input"].get("om_name"), "extracted": [], "error": str(e)}
+
+    address = (job["input"].get("address") or "").strip()
+    if not address:
+        address = next((f["value"] for f in om_fields if f["field_id"] == "address"), "")
+    if not address:
+        raise RuntimeError("No address provided, and none could be read from the OM.")
+
     geo = geocode(address)
     job["geo"] = {
         "matched_address": geo["matched_address"], "geoid": geo["geoid"],
@@ -241,6 +356,14 @@ def run_single(job):
     for fid in active:
         apply_outcome(ws, log, FIELD_BY_ID[fid], outcomes[fid],
                       property_id=job["input"].get("property_id") or "WEB", ts=ts)
+
+    # Reconcile OM deal facts over the DD results (default OM; DD wins cited conflicts).
+    if om_fields:
+        job["phase"] = "Reconciling OM values with DD findings…"
+        merged = _apply_om_merge(job, om_fields, ws, outcomes)
+        if job.get("om"):
+            job["om"]["merged"] = merged
+
     out_path = RUN_DIR / f"{job['id']}.xlsx"
     wb.save(out_path)
     job["file"] = str(out_path)
@@ -359,7 +482,7 @@ def create_job(kind, payload):
         "id": jid, "kind": kind, "status": "running", "input": payload, "label": label,
         "geo": None, "in_la_city": None, "phase": "Starting…",
         "total": 0, "completed": 0, "fields": {},
-        "parcels": None, "combined_sf": None,
+        "parcels": None, "combined_sf": None, "om": None,
         "error": None, "file": None, "filename": None,
         "started": _now(), "finished": None,
         "_lock": threading.Lock(),
@@ -399,6 +522,7 @@ def public_view(job):
         "total": job["total"], "completed": job["completed"],
         "fields": fields,
         "parcels": job["parcels"], "combined_sf": job["combined_sf"],
+        "om": job.get("om"),
         "error": job["error"], "downloadable": bool(job["file"]),
         "started": job["started"], "finished": job["finished"],
     }

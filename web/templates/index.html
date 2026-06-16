@@ -45,6 +45,10 @@
           <input type="text" id="address" name="address"
                  placeholder="11300 S Main St, Los Angeles, CA 90061" autocomplete="off">
           <p class="hint">Any California address. Runs ~40 automated readers (~10s). City of LA (ZIMAS) and City of San Diego parcels also get the full local zoning/hazard block; other cities route to manual.</p>
+
+          <label for="om" class="om-label">Offering Memorandum <span class="om-opt">(optional PDF)</span></label>
+          <input type="file" id="om" name="om" accept="application/pdf,.pdf">
+          <p class="hint">Drop the OM to auto-fill deal facts (price, land size, unit/tenant mix…). Claude reads the PDF; values default to the OM and switch to a DD answer only when our process finds a different, cited value. Leave the address blank to pull it from the OM.</p>
         </div>
 
         <div class="field hidden" data-for="assemblage">
@@ -71,6 +75,15 @@
         <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
         <p class="counts" id="counts"></p>
         <div id="parcels" class="parcels hidden"></div>
+      </section>
+
+      <section id="om-panel" class="panel hidden">
+        <h2 class="recent-head">Offering Memorandum</h2>
+        <p class="hint" id="om-sub"></p>
+        <table class="src-table" id="om-table">
+          <thead><tr><th>Field</th><th>OM value</th><th>Result</th><th>Source quote</th></tr></thead>
+          <tbody id="om-body"></tbody>
+        </table>
       </section>
 
       <section id="results" class="results"></section>

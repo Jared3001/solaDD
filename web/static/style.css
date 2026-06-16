@@ -189,7 +189,29 @@ h1, .brand-mark, .tab, .run-btn, label, th, .phase, .kicker {
 .badge.judgment  { background: var(--verify); }
 .badge.na        { background: var(--na); }
 .badge.toolfail, .badge.manual { background: var(--flag); }
+.badge.omsourced { background: var(--mid); }
 .badge.other     { background: var(--gray); }
+
+/* OM upload + panel */
+.om-label { margin-top: 18px; }
+.om-opt { color: var(--gray); font-weight: 400; }
+#om { font-family: "Source Serif 4", serif; font-size: 14px; }
+.om-sub { color: var(--gray); }
+.om-err { color: var(--flag); font-weight: 600; }
+.om-conf {
+  font-family: "IBM Plex Mono", monospace; font-size: 10px; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 999px; margin-left: 6px; vertical-align: middle;
+}
+.om-conf-high { background: #e3efe7; color: var(--ok); }
+.om-conf-medium { background: #f6ecd6; color: var(--verify); }
+.om-conf-low { background: #f7e3e1; color: var(--flag); }
+.om-out {
+  font-family: "IBM Plex Mono", monospace; font-size: 11px; padding: 2px 8px;
+  border-radius: 999px; white-space: nowrap; color: #fff;
+}
+.om-out-agree { background: var(--ok); }
+.om-out-conflict { background: var(--verify); color: var(--ink); }
+.om-out-sourced { background: var(--mid); }
 
 /* recent runs */
 .recent-head {

@@ -30,20 +30,32 @@ document.querySelectorAll(".tab").forEach(tab => {
 // ---------- run ----------
 $("#run-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const body = { mode };
-  if (mode === "single") body.address = $("#address").value.trim();
-  else body.apns = $("#apns").value;
-
   showError(null);
+
+  const omFile = mode === "single" ? ($("#om").files[0] || null) : null;
+  const address = mode === "single" ? $("#address").value.trim() : "";
+  if (mode === "single" && !address && !omFile) {
+    showError("Enter an address or upload an OM."); return;
+  }
+
+  let fetchOpts;
+  if (omFile) {
+    const fd = new FormData();
+    fd.append("mode", "single");
+    fd.append("address", address);
+    fd.append("om", omFile);
+    fetchOpts = { method: "POST", body: fd };           // browser sets multipart boundary
+  } else {
+    const body = { mode };
+    if (mode === "single") body.address = address;
+    else body.apns = $("#apns").value;
+    fetchOpts = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  }
+
   setRunning(true);
   resetStatus();
-
   try {
-    const res = await fetch("/api/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const res = await fetch("/api/run", fetchOpts);
     const data = await res.json();
     if (!res.ok) { throw new Error(data.error || "Request failed."); }
     poll(data.job_id);
@@ -99,7 +111,38 @@ function render(job) {
   }
 
   if (job.parcels) renderParcels(job);
+  if (job.om) renderOM(job.om);
   renderFields(job.fields || []);
+}
+
+function renderOM(om) {
+  const panel = $("#om-panel");
+  const sub = $("#om-sub");
+  if (om.error) {
+    panel.classList.remove("hidden");
+    sub.innerHTML = `<span class="om-err">OM not read: ${esc(om.error)}</span>`;
+    $("#om-body").innerHTML = "";
+    return;
+  }
+  const rows = om.extracted || [];
+  if (!rows.length) { panel.classList.add("hidden"); return; }
+  panel.classList.remove("hidden");
+  const byId = Object.fromEntries((om.merged || []).map(m => [m.field_id, m]));
+  const nConf = (om.merged || []).filter(m => m.outcome === "conflict").length;
+  sub.textContent = `${rows.length} value(s) read from ${om.name || "the OM"}`
+    + (nConf ? ` · ${nConf} conflict(s) — DD value kept, see notes` : "");
+  $("#om-body").innerHTML = rows.map(r => {
+    const m = byId[r.field_id] || {};
+    const outcome = m.outcome || "om-sourced";
+    const tag = { "agree": ["agree", "OM = DD ✓"], "conflict": ["conflict", `DD kept: ${esc(m.dd_value)}`],
+                  "om-sourced": ["sourced", "OM-sourced"] }[outcome] || ["sourced", "OM-sourced"];
+    return `<tr>
+      <td class="src-name">${esc(r.field_id)}</td>
+      <td>${esc(r.value)} <span class="om-conf om-conf-${esc(r.confidence)}">${esc(r.confidence)}</span></td>
+      <td><span class="om-out om-out-${tag[0]}">${tag[1]}</span></td>
+      <td class="src-detail">${esc(r.source_quote)}</td>
+    </tr>`;
+  }).join("");
 }
 
 function renderParcels(job) {
@@ -143,6 +186,7 @@ function badge(state) {
   let cls = "other";
   if (s === "VERIFIED" || s === "COMPUTED" || s === "OM-SOURCED") cls = "verified";
   else if (s === "JUDGMENT") cls = "judgment";
+  else if (s === "OM-SOURCED") cls = "omsourced";
   else if (s === "NA") cls = "na";
   else if (s.startsWith("TOOL-FAIL")) cls = "toolfail";
   else if (s === "MANUAL-VERIFY") cls = "manual";
@@ -157,6 +201,8 @@ function setRunning(on) {
 }
 function resetStatus() {
   $("#results").innerHTML = "";
+  $("#om-panel").classList.add("hidden");
+  $("#om-body").innerHTML = "";
   $("#parcels").classList.add("hidden");
   $("#parcels").innerHTML = "";
   $("#download").classList.add("hidden");

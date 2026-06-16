@@ -32,6 +32,13 @@ if APP_PASSWORD == "sola-dev":
 
 # Cap how much work one request can kick off.
 MAX_APNS = 25
+# Reject oversized uploads before they hit memory (OM PDFs). Matches om_extract's cap + headroom.
+app.config["MAX_CONTENT_LENGTH"] = 22 * 1024 * 1024
+
+
+@app.errorhandler(413)
+def too_large(_):
+    return jsonify({"error": "Upload too large (max ~20 MB). Compress the OM PDF and retry."}), 413
 
 
 def login_required(f):
@@ -77,13 +84,28 @@ def index():
 @app.post("/api/run")
 @login_required
 def api_run():
-    data = request.get_json(silent=True) or {}
-    mode = data.get("mode")
+    # Single-address runs may arrive as multipart (with an OM PDF) or JSON.
+    if request.content_type and request.content_type.startswith("multipart/form-data"):
+        mode = request.form.get("mode")
+        data = request.form
+        om_file = request.files.get("om")
+    else:
+        data = request.get_json(silent=True) or {}
+        mode = data.get("mode")
+        om_file = None
+
     if mode == "single":
         address = (data.get("address") or "").strip()
-        if not address:
-            return jsonify({"error": "Address is required."}), 400
-        jid = jobs.create_job("single", {"address": address})
+        payload = {"address": address}
+        if om_file and om_file.filename:
+            om_bytes = om_file.read()
+            if not om_bytes:
+                return jsonify({"error": "The uploaded OM is empty."}), 400
+            payload["om_bytes"] = om_bytes
+            payload["om_name"] = om_file.filename
+        elif not address:
+            return jsonify({"error": "Enter an address or upload an OM."}), 400
+        jid = jobs.create_job("single", payload)
         return jsonify({"job_id": jid})
     if mode == "assemblage":
         raw = data.get("apns") or ""
