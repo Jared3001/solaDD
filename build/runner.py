@@ -34,17 +34,34 @@ def _attempt_count(token) -> int:
     return 0
 
 
-def run_field(wb_path, field: dict, reader, *, property_id=None, max_attempts=MAX_ATTEMPTS) -> str:
-    wb = load_workbook(wb_path)
-    ws, log = wb["Site DD"], wb["State Log"]
+def run_reader(reader):
+    """Run a reader OFF the workbook (thread-safe — no shared mutable state).
+
+    Returns ('ok', {answer,notes,state}) or ('fail', exception). This is the
+    parallelizable half: collect.py fans these out across a thread pool, then
+    applies the outcomes to the workbook serially with apply_outcome().
+    """
+    try:
+        return ("ok", reader())
+    except Exception as e:
+        return ("fail", e)
+
+
+def apply_outcome(ws, log, field: dict, outcome, *, property_id, ts, max_attempts=MAX_ATTEMPTS) -> str:
+    """Write one reader outcome to an ALREADY-OPEN workbook; return the state.
+
+    Reads the prior Status (Column A) to continue the TOOL-FAIL counter, so
+    escalation across re-runs still works. Call this serially (it mutates the
+    workbook); do the network in run_reader() in parallel first.
+    """
     row = int(field["answer_cell"][1:])
     status = ws.cell(row, 1)
     n = _attempt_count(status.value)
-    ts = datetime.datetime.now().isoformat(timespec="seconds")
-    pid = property_id or ws["C3"].value or str(wb_path)
+    pid = property_id or ws["C3"].value or "?"
     tool = field.get("source_of_record", "")
-    try:
-        out = reader()
+    kind, payload = outcome
+    if kind == "ok":
+        out = payload
         ws.cell(row, 3, out["answer"])
         if out.get("notes"):
             prev = ws.cell(row, 5).value
@@ -54,7 +71,8 @@ def run_field(wb_path, field: dict, reader, *, property_id=None, max_attempts=MA
             landing = "VERIFIED"
         status.value = landing
         log.append([ts, pid, field["id"], tool, "success", n + 1, ""])
-    except Exception as e:
+    else:
+        e = payload
         n += 1
         if n >= max_attempts:
             status.value = "MANUAL-VERIFY"
@@ -62,8 +80,19 @@ def run_field(wb_path, field: dict, reader, *, property_id=None, max_attempts=MA
         else:
             status.value = f"TOOL-FAIL {n}/{max_attempts}"
             log.append([ts, pid, field["id"], tool, "fail", n, str(e)[:200]])
-    wb.save(wb_path)
     return status.value
+
+
+def run_field(wb_path, field: dict, reader, *, property_id=None, max_attempts=MAX_ATTEMPTS) -> str:
+    """Single-field convenience: load, run reader, apply, save. (collect.py uses
+    run_reader + apply_outcome directly for the parallel path.)"""
+    wb = load_workbook(wb_path)
+    ws, log = wb["Site DD"], wb["State Log"]
+    ts = datetime.datetime.now().isoformat(timespec="seconds")
+    state = apply_outcome(ws, log, field, run_reader(reader),
+                          property_id=property_id, ts=ts, max_attempts=max_attempts)
+    wb.save(wb_path)
+    return state
 
 
 def _selftest():

@@ -10,9 +10,15 @@ retry, and ArcGIS error surfacing. Each source module then only encodes its
 endpoint + how to read the attributes into the {"answer","notes"} contract that
 runner.run_field consumes. A raised exception -> runner records TOOL-FAIL.
 """
-import json, math, time, urllib.parse, urllib.request
+import json, math, threading, time, urllib.parse, urllib.request
 
 UA = "Mozilla/5.0 (solaDD Tier-A reader)"
+
+# Per-process response cache (keyed by full URL) — dedupes identical queries fired
+# by different readers in one run (e.g. zoning / q_conditions / transitional_height
+# all hit NavigateLA layer 71). Thread-safe for the parallel collect fan-out.
+_CACHE = {}
+_CACHE_LOCK = threading.Lock()
 
 
 def query(service, layer, *, lon=None, lat=None, where=None, out_fields="*",
@@ -39,6 +45,9 @@ def query(service, layer, *, lon=None, lat=None, where=None, out_fields="*",
     if return_geometry:
         params["outSR"] = str(out_sr)
     url = f"{service}/{layer}/query?{urllib.parse.urlencode(params)}"
+    with _CACHE_LOCK:
+        if url in _CACHE:
+            return _CACHE[url]
     last = None
     for i in range(tries):
         try:
@@ -48,7 +57,10 @@ def query(service, layer, *, lon=None, lat=None, where=None, out_fields="*",
             if isinstance(data, dict) and "error" in data:
                 e = data["error"]
                 raise RuntimeError(f"ArcGIS error {e.get('code')}: {e.get('message')}")
-            return data.get("features", [])
+            feats = data.get("features", [])
+            with _CACHE_LOCK:
+                _CACHE[url] = feats
+            return feats
         except Exception as exc:
             last = exc
             if i < tries - 1:

@@ -28,6 +28,7 @@ import re
 import sys
 import shutil
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "build"))
@@ -36,8 +37,9 @@ sys.path.insert(0, str(ROOT / "build" / "sources"))
 import yaml
 import _arcgis as ag
 from geocoder import geocode_point
+from runner import run_reader
 from collect import READERS, ZIMAS_READERS
-import zimas
+import zimas, nc
 
 LACITY_PARCELS = "https://maps.lacity.org/lahub/rest/services/Landbase_Information/MapServer"
 PARCEL_LAYER = 5   # "Parcels" — geometry area in EPSG:2229 reproduces ZIMAS lot area
@@ -93,21 +95,51 @@ def parcel_info(apn: str) -> dict:
             "place": geo.get("place"), "matched_address": geo["matched_address"]}
 
 
-def _run_readers(parcel):
-    """Run every reader for one parcel; return {fid: {'answer','state','error'}}."""
-    geo = {"lon": parcel["lon"], "lat": parcel["lat"], "geoid": parcel["geoid"],
-           "state_fips": parcel["state_fips"], "county_fips": parcel["county_fips"],
-           "place": parcel.get("place"), "matched_address": parcel["matched_address"]}
-    out = {}
-    for fid, fn in {**READERS, **ZIMAS_READERS}.items():
-        if fid in _SITE_LEVEL:   # assemblage writes these itself (combined / per-APN list)
-            continue
-        try:
-            r = fn(geo)
-            out[fid] = {"answer": r.get("answer"), "state": r.get("state", "VERIFIED")}
-        except Exception as e:
-            out[fid] = {"answer": None, "state": "TOOL-FAIL", "error": str(e)[:120]}
-    return out
+def _parcel_geo(parcel):
+    return {"lon": parcel["lon"], "lat": parcel["lat"], "geoid": parcel["geoid"],
+            "state_fips": parcel["state_fips"], "county_fips": parcel["county_fips"],
+            "place": parcel.get("place"), "matched_address": parcel["matched_address"]}
+
+
+def _run_all_parcels(parcels, workers=12):
+    """Run every (parcel, reader) task through one thread pool; return per[apn][fid].
+
+    Snaps are pre-warmed per parcel (different cache keys, no race) and the
+    Neighborhood-Change file once, so the parallel fan-out only does fresh reads.
+    """
+    readers = {k: v for k, v in {**READERS, **ZIMAS_READERS}.items() if k not in _SITE_LEVEL}
+    try:
+        nc._load()
+    except Exception:
+        pass
+    with ThreadPoolExecutor(max_workers=min(6, len(parcels))) as ex:
+        list(ex.map(lambda p: _warm(_parcel_geo(p)), parcels))
+
+    tasks = [(p, fid, fn) for p in parcels for fid, fn in readers.items()]
+
+    def _task(t):
+        p, fid, fn = t
+        geo = _parcel_geo(p)
+        kind, payload = run_reader(lambda: fn(geo))
+        if kind == "ok":
+            return p["apn"], fid, {"answer": payload.get("answer"), "state": payload.get("state", "VERIFIED")}
+        return p["apn"], fid, {"answer": None, "state": "TOOL-FAIL", "error": str(payload)[:120]}
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        raw = list(ex.map(_task, tasks))
+    per = {"_order": parcels}
+    for p in parcels:
+        per[p["apn"]] = {}
+    for apn, fid, res in raw:
+        per[apn][fid] = res
+    return per
+
+
+def _warm(geo):
+    try:
+        zimas.in_la_city(geo)   # warms this parcel's snap cache
+    except Exception:
+        pass
 
 
 def _aggregate(fid, atype, per_parcel):
@@ -156,18 +188,15 @@ def assess(wb_path, apns, property_id=None):
     by_id = {f["id"]: f for f in schema["fields"]}
     atype = {f["id"]: f.get("answer_type") for f in schema["fields"]}
 
-    parcels = []
     print(f"resolving {len(apns)} APN(s)…")
-    for apn in apns:
-        p = parcel_info(apn)
-        parcels.append(p)
+    with ThreadPoolExecutor(max_workers=min(6, len(apns))) as ex:
+        parcels = list(ex.map(parcel_info, apns))   # map preserves input order
+    for p in parcels:
         print(f"  {p['apn']:16} BPP {p['bpp']:12} {p['n_lots']} lot(s)  {p['land_sf']:>10,.1f} sf  tract {p['geoid']}")
     combined = round(sum(p["land_sf"] for p in parcels), 1)
     print(f"  COMBINED LAND AREA: {combined:,.1f} sf  ({combined/43560:.3f} ac)\n")
 
-    per = {"_order": parcels}
-    for p in parcels:
-        per[p["apn"]] = _run_readers(p)
+    per = _run_all_parcels(parcels)
 
     # write to workbook
     from openpyxl import load_workbook

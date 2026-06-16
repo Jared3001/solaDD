@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.9-draft (2026-06-15)
+- Parallelized the pipeline (readers are I/O-bound -> threads release the GIL).
+  Single-parcel collect ~60-90s -> ~10s; 3-parcel assemblage minutes -> ~18s.
+  Output is identical — only timing changed.
+  - runner.py split: run_reader() runs a reader OFF the workbook (thread-safe);
+    apply_outcome() writes one outcome to an already-open workbook. run_field()
+    now composes them (selftest unchanged).
+  - collect.py: Phase 1 fans all readers across a ThreadPoolExecutor; Phase 2
+    applies outcomes in a single workbook open/save (was ~40 load/saves). Shared
+    caches (zimas parcel snap, nc Neighborhood-Change file) pre-warmed before the
+    fan-out to avoid races.
+  - _arcgis.py: thread-safe per-process response cache — dedupes identical queries
+    (e.g. zoning/q_conditions/transitional_height all hitting NavigateLA layer 71).
+  - places.py: the 8 proximity categories now fetch in ONE combined Overpass query
+    per parcel (per-key locked + cached) instead of 8 calls.
+  - assemblage.py: APN resolution parallelized; all (parcel x reader) tasks run in
+    one pool with per-parcel snaps pre-warmed.
+
 ## v0.8.1-draft (2026-06-15)
 - Street View logged as an ACTIVATE-LATER feature and DEACTIVATED: streetview.py
   gains an `ENABLED = False` switch (functions raise while off; have_key() returns

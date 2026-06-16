@@ -16,14 +16,16 @@ Usage:
 A field is automated only if it appears in READERS; everything else keeps the
 state the template/generator assigned (DESK-PENDING, BROWSER-PENDING, etc.).
 """
-import sys, json, shutil
+import sys, json, shutil, datetime
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "build" / "sources"))
 
 import yaml
-from runner import run_field
+from openpyxl import load_workbook
+from runner import run_reader, apply_outcome
 from geocoder import geocode
 import fema, hud, tcac, oz, calfire, calgem, cgs, ust, zimas, jurisdiction, parcel, nc, pha
 import places, slope, towers, airport, coastal
@@ -80,25 +82,41 @@ ZIMAS_READERS = {
 }
 
 
-def collect(wb_path, address, property_id=None):
+def collect(wb_path, address, property_id=None, workers=10):
     schema = yaml.safe_load((ROOT / "canonical/schema.yaml").read_text())
     by_id = {f["id"]: f for f in schema["fields"]}
     geo = geocode(address)
     print(f"geocoded: {geo['matched_address']}  tract {geo['geoid']}  "
           f"({geo['lat']:.5f},{geo['lon']:.5f})\n")
     active = dict(READERS)
-    if zimas.in_la_city(geo):
+    if zimas.in_la_city(geo):       # also warms the parcel snap the ZIMAS readers share
         active.update(ZIMAS_READERS)
         print("parcel is in LA City -> running ZIMAS block\n")
     else:
         print("parcel not in LA City -> ZIMAS block skipped (route to local planning)\n")
+    try:
+        nc._load()                  # warm the Neighborhood Change cache once (shared by threads)
+    except Exception:
+        pass
+
+    # Phase 1 — fetch every reader concurrently (I/O-bound; off the workbook).
+    def _fetch(item):
+        fid, fn = item
+        return fid, run_reader(lambda: fn(geo))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        outcomes = dict(ex.map(_fetch, list(active.items())))
+
+    # Phase 2 — apply all outcomes to the workbook in a single open/save.
+    wb = load_workbook(wb_path)
+    ws, log = wb["Site DD"], wb["State Log"]
+    ts = datetime.datetime.now().isoformat(timespec="seconds")
     results = {}
-    for fid, fn in active.items():
+    for fid in active:
         field = by_id[fid]
-        state = run_field(wb_path, field, (lambda fn=fn: fn(geo)),
-                          property_id=property_id or "DEMO")
+        state = apply_outcome(ws, log, field, outcomes[fid], property_id=property_id or "DEMO", ts=ts)
         results[fid] = (field["answer_cell"], state)
         print(f"  {field['answer_cell']:5} {fid:28} -> {state}")
+    wb.save(wb_path)
     return results, geo
 
 
