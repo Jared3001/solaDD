@@ -93,6 +93,9 @@ def apn(geo) -> dict:
         bpp = zimas._snapped(geo)[0].get("BPP")
         formatted = f"{bpp[:4]}-{bpp[4:7]}-{bpp[7:]}" if bpp and len(bpp) == 10 else bpp
         return {"answer": formatted, "notes": f"APN {formatted} from LA City parcel snap. Source: LA City Parcels."}
+    if _county_basename(geo) == "San Diego":
+        import sd_parcel
+        return sd_parcel.apn(geo)
     import parcel
     ain, matched = parcel._county_snap(geo)
     if not ain:

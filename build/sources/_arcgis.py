@@ -22,15 +22,21 @@ _CACHE_LOCK = threading.Lock()
 
 
 def query(service, layer, *, lon=None, lat=None, where=None, out_fields="*",
-          distance=None, return_geometry=False, out_sr=4326, timeout=30, tries=3):
+          distance=None, return_geometry=False, return_centroid=False,
+          out_sr=4326, timeout=30, tries=3):
     """Run an ArcGIS REST query; return the features list (raises on failure).
 
-    where=...  -> attribute query (e.g. GEOID membership), no geometry.
-    lon/lat    -> point-intersect query; add distance (metres) for proximity.
+    where=...        -> attribute query (e.g. GEOID membership), no geometry.
+    lon/lat          -> point-intersect query; add distance (metres) for proximity.
+    return_centroid  -> ask the server for each feature's centroid (in out_sr),
+                        surfaced as f["centroid"]={"x","y"}. Cheaper than full
+                        geometry for nearest-parcel snapping.
     """
     params = {"outFields": out_fields,
               "returnGeometry": "true" if return_geometry else "false",
               "f": "json"}
+    if return_centroid:
+        params["returnCentroid"] = "true"
     if where is not None:
         params["where"] = where
     else:
@@ -42,7 +48,7 @@ def query(service, layer, *, lon=None, lat=None, where=None, out_fields="*",
                        "spatialRel": "esriSpatialRelIntersects"})
         if distance:
             params.update({"distance": str(distance), "units": "esriSRUnit_Meter"})
-    if return_geometry:
+    if return_geometry or return_centroid:
         params["outSR"] = str(out_sr)
     url = f"{service}/{layer}/query?{urllib.parse.urlencode(params)}"
     with _CACHE_LOCK:

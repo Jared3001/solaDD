@@ -65,6 +65,11 @@ def land_sf(geo) -> dict:
                     "notes": f"Gross land area {sf:,.0f} sf from LA City Parcels geometry (APN {apn}{extra}). "
                              f"GROSS — capture buildable separately (setbacks/slope); reconcile vs ALTA survey. "
                              f"Source: LA City Parcels."}
+    # San Diego County -> SANDAG/SanGIS parcels (LA County layer has no SD parcels).
+    from jurisdiction import _county_basename
+    if _county_basename(geo) == "San Diego":
+        import sd_parcel
+        return sd_parcel.land_sf(geo)
     ain, matched = _county_snap(geo)
     if not ain:
         raise LookupError("no LA City/County parcel at/near the geocoded point for land area")

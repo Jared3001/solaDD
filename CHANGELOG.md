@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.12-draft (2026-06-16) — San Diego expansion, step 1: parcel keystone
+- New `build/sources/sd_parcel.py` — San Diego County `apn` + `land_sf` via SANDAG's
+  countywide Hosted/Parcels layer (the SD analog of LA City Parcels). Address-aware
+  snap (same street + closest situs house number within a 150 m buffer, nearest-by-
+  centroid fallback) mirrors `parcel._county_snap`; gross area from polygon geometry
+  in EPSG:2230 (CA State Plane Zone VI, US ft → sq ft, like LA's 2229). APN formatted
+  ###-###-##-##. Includes `parcel_info()` for future assemblage wiring.
+- `parcel.land_sf` and `jurisdiction.apn` now route to `sd_parcel` when the county is
+  San Diego (LA City / LA County paths unchanged; regression-tested green for LA).
+- `_arcgis.query` gained `return_centroid` (surfaces each feature's centroid in out_sr)
+  for cheap nearest-parcel snapping without fetching full geometry.
+- Live-validated on real SD addresses (e.g. 525 B St → APN 533-523-14-00, 24,656 sf,
+  VERIFIED); full `collect.py` SD run green — the ~27 statewide/federal readers light up,
+  `pha` resolves to San Diego Housing Commission, ZIMAS block correctly skipped.
+- Finding (logged in SAN_DIEGO_EXPANSION.md): `tcac.resource_area`'s endpoint is LA
+  County's republished copy (0 San Diego tracts) — needs the statewide 2026 TCAC/HCD
+  Opportunity Map. Next steps: statewide TCAC source, then the SD zoning/airport/transit
+  block.
+
 ## v0.11-draft (2026-06-15)
 - hud.qct / hud.dda now report BOTH the current and prior designation year and
   land JUDGMENT when they differ. QCT/DDA are re-designated annually (effective

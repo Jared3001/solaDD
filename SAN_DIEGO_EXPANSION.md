@@ -1,6 +1,27 @@
 # San Diego County Expansion — Source Analysis & Plan
 
-**Status:** analysis complete, endpoints validated live; build not started. 2026-06-16.
+**Status:** analysis complete; **parcel keystone built + live-validated** (step 1). 2026-06-16.
+
+## Build progress
+- ✅ **Parcel keystone (`build/sources/sd_parcel.py`)** — `apn` + `land_sf` for San Diego
+  via SANDAG Hosted/Parcels, address-aware snap (mirrors `parcel._county_snap`), area
+  from polygon geometry in EPSG:2230. Routed in via `parcel.land_sf` and
+  `jurisdiction.apn` (county branch; LA paths untouched, regression-tested). `_arcgis.query`
+  gained `return_centroid` for cheap nearest-parcel snapping. Live-tested on real SD
+  addresses (e.g. 525 B St → APN 533-523-14-00, 24,656 sf, VERIFIED); full `collect.py`
+  SD run green. `pha` confirmed resolving to **San Diego Housing Commission** (the naming
+  risk in the analysis — handled). `parcel_info()` ready for assemblage wiring (next).
+- 🔎 **Finding — `resource_area` does NOT port for free.** The TCAC endpoint in `tcac.py`
+  (`RmCCgQtiZLDCtblq/…2026_TCAC_HCD_Opportunity_Area_Maps`) is **LA County's republished
+  copy** — it contains only 06037 tracts (0 for San Diego). Needs the **statewide** 2026
+  CTCAC/HCD Opportunity Map (a 2025 statewide copy exists at `services6.arcgis.com/
+  PArfeTGcwA9RGNzN/…CTCAC_HCD_Opportunity_Area_Map_2025`; locate the 2026 statewide layer
+  with the same `oppcat`/`fips` fields). This also improves LA robustness. Moved below
+  from "works as-is".
+
+---
+
+**Original analysis (2026-06-16):**
 **Goal:** extend the DD feasibility automation to cover San Diego County deals, the
 same way it covers LA today — reusing every reader that is national or CA-statewide,
 and replacing the LA-City / LA-County-specific readers with San Diego equivalents.
@@ -56,7 +77,8 @@ structured situs + polygon geometry in State Plane feet).
 
 ### ✅ Works as-is — ~27 fields (no change)
 `address`, `county`, `geographic_pool` (SD→Coastal Region), `city_jurisdiction`
-(Census place), `pha`†, `qct`, `dda`, `resource_area`, `neighborhood_change_area`,
+(Census place), `pha`† (✅ confirmed = San Diego Housing Commission), `qct`, `dda`,
+`neighborhood_change_area`,
 `opportunity_zone`, `flood_zone`, `very_high_fire_hazard_zone`, `coastal_zone`‡,
 `wells_on_site`, `liquefaction_zone`§, `alquist_priolo_fault_zone`§,
 `underground_storage_tanks`, `slope_grade`, `cell_towers`, and the 8 `nearest_*`
