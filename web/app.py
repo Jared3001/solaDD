@@ -32,13 +32,15 @@ if APP_PASSWORD == "sola-dev":
 
 # Cap how much work one request can kick off.
 MAX_APNS = 25
-# Reject oversized uploads before they hit memory (OM PDFs). Matches om_extract's cap + headroom.
-app.config["MAX_CONTENT_LENGTH"] = 22 * 1024 * 1024
+# Reject oversized uploads before buffering (OM PDFs go via the Files API). Aligns
+# with om_extract's cap (OM_MAX_MB, default 150) + headroom for multipart overhead.
+_OM_MAX_MB = int(os.environ.get("OM_MAX_MB", "150"))
+app.config["MAX_CONTENT_LENGTH"] = (_OM_MAX_MB + 10) * 1024 * 1024
 
 
 @app.errorhandler(413)
 def too_large(_):
-    return jsonify({"error": "Upload too large (max ~20 MB). Compress the OM PDF and retry."}), 413
+    return jsonify({"error": f"Upload too large (max ~{_OM_MAX_MB} MB). Compress the OM PDF and retry."}), 413
 
 
 def login_required(f):

@@ -3,9 +3,14 @@
 om_extract.py — pull deal facts out of an Offering Memorandum (OM) PDF with Claude.
 
 OMs are unstructured (often scanned) marketing PDFs, so extraction uses the
-Anthropic API: Claude reads the PDF natively (document content block) and returns
-a validated, structured list of deal facts via structured outputs. Each extracted
-value carries a confidence and a short verbatim source quote for provenance.
+Anthropic API: the PDF is uploaded via the Files API, Claude reads it natively
+(document content block referencing the file_id), and returns a validated,
+structured list of deal facts via structured outputs. Each extracted value
+carries a confidence and a short verbatim source quote for provenance. The
+uploaded file is deleted as soon as extraction returns.
+
+Using the Files API (rather than inlining base64) lets this handle large,
+scanned OM decks — up to the Files API's 500 MB limit.
 
 These map onto the schema's `fill_method: desk_om` fields — the deal facts the OM
 is authoritative for (price, land size, unit/tenant mix, escrow dates, …). The
@@ -17,13 +22,14 @@ claude-sonnet-4-6 / claude-haiku-4-5 to cut cost).
 """
 import io
 import os
-import base64
 from typing import Literal, Optional
 
 from pydantic import BaseModel
 
 OM_MODEL = os.environ.get("OM_MODEL", "claude-opus-4-8")
-MAX_PDF_BYTES = 20 * 1024 * 1024   # ~20 MB raw -> ~27 MB base64, under the inline request cap
+FILES_BETA = "files-api-2025-04-14"
+# Generous cap (well above typical OM decks); the Files API itself allows up to 500 MB.
+MAX_PDF_BYTES = int(os.environ.get("OM_MAX_MB", "150")) * 1024 * 1024
 
 # Deal-fact fields the OM is authoritative for (schema fill_method: desk_om),
 # field_id -> human description that guides extraction.
@@ -112,23 +118,32 @@ def extract(pdf_bytes: bytes, filename: str = "om.pdf") -> list[dict]:
     import anthropic   # imported lazily so the app runs without the dep until OM is used
 
     client = anthropic.Anthropic()
-    b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+
+    # Upload via the Files API, reference by file_id, delete when done.
+    uploaded = client.beta.files.upload(
+        file=(filename or "om.pdf", io.BytesIO(pdf_bytes), "application/pdf"),
+    )
     try:
-        msg = client.messages.parse(
+        msg = client.beta.messages.parse(
+            betas=[FILES_BETA],
             model=OM_MODEL,
             max_tokens=8192,
             messages=[{
                 "role": "user",
                 "content": [
                     {"type": "text", "text": _prompt()},
-                    {"type": "document",
-                     "source": {"type": "base64", "media_type": "application/pdf", "data": b64}},
+                    {"type": "document", "source": {"type": "file", "file_id": uploaded.id}},
                 ],
             }],
             output_format=OMExtract,
         )
     except anthropic.APIError as e:
         raise OMExtractError(f"Claude API error during OM extraction: {e}") from e
+    finally:
+        try:
+            client.beta.files.delete(uploaded.id)
+        except Exception:
+            pass
 
     parsed: Optional[OMExtract] = msg.parsed_output
     if not parsed:

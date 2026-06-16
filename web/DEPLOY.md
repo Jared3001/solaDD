@@ -46,6 +46,9 @@ Open http://127.0.0.1:8000, sign in with `APP_PASSWORD`.
      the Anthropic API and not persisted server-side.
    - *(optional)* `OM_MODEL` — model for OM extraction (default `claude-opus-4-8`;
      set `claude-sonnet-4-6` or `claude-haiku-4-5` to cut cost).
+   - *(optional)* `OM_MAX_MB` — max OM PDF size in MB (default `150`). OMs are
+     uploaded via the Anthropic Files API (handles large/scanned decks) and the
+     uploaded file is deleted right after extraction.
 5. **Settings → Networking → Generate Domain** to get the team URL.
 6. **Settings → Healthcheck Path:** `/healthz` (returns plain `200`).
 7. Every push to the connected branch redeploys automatically.
