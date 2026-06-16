@@ -17,6 +17,10 @@ Scale-test fixes (the 9-site batch surfaced these):
   rather than VERIFIED — it is a DEM screen, not a verdict.
 - places: 4 Overpass mirrors + 35 s per-endpoint timeout for fast failover (fixes
   the 134 s outlier seen in the batch).
+- hud.dda now queries by the address ZIP (ZCTA5) instead of point-in-polygon — an
+  imprecise geocode point could fall in the wrong ZCTA and miss a real DDA
+  (e.g. La Cienega / ZCTA 90232). Falls back to point-in-polygon for non-metro
+  (county-keyed) DDAs.
 
 ## v0.9.1-draft (2026-06-15)
 - places.py: tightened two loosely-tagged OSM categories. nearest_school now

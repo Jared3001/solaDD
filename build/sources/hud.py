@@ -14,6 +14,8 @@ QCT/DDA are reissued ANNUALLY and the service name carries the year. When the
 .../VTyQ9soqVukalItT/ArcGIS/rest/services?f=json — the suffix pattern is not
 stable across years).
 """
+import re
+
 import _arcgis as ag
 
 ORG = "https://services.arcgis.com/VTyQ9soqVukalItT/ArcGIS/rest/services"
@@ -31,8 +33,18 @@ def qct(geo) -> dict:
             "notes": f"Not a {YEAR} HUD QCT (tract {geo['geoid']}). Source: HUD SADDA."}
 
 
+def _zip5(geo):
+    m = re.findall(r"\b(\d{5})\b", geo.get("matched_address") or "")
+    return m[-1] if m else None
+
+
 def dda(geo) -> dict:
-    feats = ag.query(DDA, 0, lon=geo["lon"], lat=geo["lat"], out_fields="ZCTA5,DDA_TYPE,DDA_NAME")
+    # Metro Small-Area DDAs are keyed by ZCTA5 — query by the address ZIP (robust to
+    # an imprecise geocode point that could fall in the wrong ZCTA polygon).
+    zip5 = _zip5(geo)
+    feats = ag.query(DDA, 0, where=f"ZCTA5='{zip5}'", out_fields="ZCTA5,DDA_TYPE,DDA_NAME") if zip5 else []
+    if not feats:   # non-metro DDAs are county-keyed -> fall back to point-in-polygon
+        feats = ag.query(DDA, 0, lon=geo["lon"], lat=geo["lat"], out_fields="ZCTA5,DDA_TYPE,DDA_NAME")
     if feats:
         a = feats[0]["attributes"]
         kind = a.get("DDA_TYPE") or ""
