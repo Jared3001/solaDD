@@ -8,3 +8,6 @@ build/sources/_cache/
 build/_streetview*
 build/_*.json
 build/_*.out
+build/_uw*/
+build/_underwriting/
+build/*.xlsm

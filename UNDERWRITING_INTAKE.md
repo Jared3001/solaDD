@@ -175,7 +175,21 @@ For each deal the exporter will:
    recalcs in Excel; first-pass outputs at `C24:C30`.
 
 ## Status
-**Logic confirmed (2026-06-16); ready to build.** Two implementation lookups remain (do at build
-time, not senior questions): the `Pro_Forma` residential-stories cell and the construction-time
-(duration) cell. Then build the exporter: DD checklist (or `collect.py`) → filled `Pro_Forma`
-inputs → two saved models.
+**BUILT (2026-06-16).** Exporter shipped as `build/underwrite.py` (+ pure-logic
+`build/sources/uw_logic.py`). Both build-time lookups are resolved and wired in:
+- residential stories = `Pro_Forma!C15` (input, default 5; the `C9` formula keys on it) — left for the analyst.
+- construction time = `Draws_Module!B5` ("Construction Time (m)") — set to 24 (Stick) / 18 (Modular).
+
+Other cells confirmed against the template's data validations: PHA `C4` ← dropdown
+`$AH$29:$AH$40` (11 canonical labels); resource `C6` ∈ {Low, Medium, High, Highest};
+QCT/DDA `C5` ∈ {QCT, DDA, None}; type `C9` ∈ {Type I, Type III, Other}; `A36` ∈ {Modular, Stick}.
+Bedroom mix writes `I3/I5/I6` (`I4` 1B is the template's `=1-I3-I5-I6` remainder; unit *counts*
+`H3:H6` stay model-derived). AMI 10/10/80 writes `R35/R36` = 0.10 and `R38` = 0 (`R37` @60% is
+the template's remainder). Modular overrides sizes `L5`=804 / `L6`=994. openpyxl `keep_vba` round-trip
+verified safe (macros + 12 LAMBDA names + existing formulas preserved).
+
+**Usage:** `python build/underwrite.py <DD_checklist.xlsx> --template <master.xlsm> [--out DIR] [--name "Deal"]`
+→ writes `<deal> — Stick.xlsm` and `<deal> — Modular.xlsm`. `--selftest <example.xlsm>` round-trips
+and asserts every written cell. **Point `--template` at a clean master pro-forma** (not a filled
+deal) so the untouched Hand fields — stories `C15`, acquisition price, BIPOC, prevailing wage — start
+blank. Self-test PASS on Kinzie (Large Family) + demo (Standard/1B) branches.

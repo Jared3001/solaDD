@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.14-draft (2026-06-16) — underwriting exporter (DD → two pro-forma models)
+First-pass underwriting models now auto-generate from a completed DD checklist.
+- **New `build/underwrite.py`** — reads a DD checklist (`Site DD` sheet) and writes
+  the DD-derived site inputs + confirmed projection-logic assumptions into SoLa's
+  pro-forma `.xlsm`, saving **two files per deal**: `<deal> — Stick.xlsm` and
+  `<deal> — Modular.xlsm`. openpyxl `keep_vba` preserves the template's macros, 12
+  LAMBDA defined names, and existing formulas (round-trip verified).
+- **New `build/sources/uw_logic.py`** — pure, unit-testable projection rules
+  (UNDERWRITING_INTAKE.md Part B): county strip, QCT/DDA collapse, resource→C6
+  vocab, PHA→canonical dropdown label, bedroom mix by resource (Large Family vs
+  100% 1B), AMI 10/10/80, CRA derivation, the build-method-aware `C9` construction-
+  type formula, and the method overlay (A36, Modular sizes L5/L6, build time
+  Draws_Module!B5 = 24/18 mo).
+- **Cells set:** B2, C3–C9, C12, I3/I5/I6, R35/R36/R38 (+ method: A36, L5/L6, B5).
+  **Left for the analyst (Hand):** stories C15, acquisition price, BIPOC, prevailing
+  wage. `--selftest` round-trips an example .xlsm and asserts every written cell;
+  PASS on Kinzie (Large Family) and the 11300 S Main demo (Standard/1B).
+
 ## v0.13-draft (2026-06-16) — San Diego expansion complete (parity with LA)
 A San Diego County address now auto-fills the same ~37 fields as LA (only the 3
 LA-only zoning concepts are N/A). Built in parallel:
