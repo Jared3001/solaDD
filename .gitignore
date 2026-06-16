@@ -6,3 +6,5 @@ properties/
 build/_*.xlsx
 build/sources/_cache/
 build/_streetview*
+build/_*.json
+build/_*.out
