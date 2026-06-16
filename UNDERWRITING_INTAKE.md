@@ -104,65 +104,78 @@ Anything you mark **Hand** the exporter will leave blank/untouched for the analy
 
 ---
 
-## Part B — Draft projection logic (decision tables) — RED-LINE THESE
+## Part B — CONFIRMED projection logic (senior review 2026-06-16)
 
-> All values **[CONFIRM]**. Inputs in **bold** are ones we already have from the DD checklist.
+> Confirmed by senior review (Part A2 form + follow-up). Inputs in **bold** come from the DD
+> checklist; the rest are rules the exporter applies. Two implementation details still to pin
+> down at build time are flagged **[locate]**.
 
-### B1. Unit mix (bedroom %) — keyed on product type
-| Product | 0B | 1B | 2B | 3B | Notes |
+### B0. Final disposition of every value
+- **Auto (from DD):** project name `B2` · county `C3` · PHA `C4` · QCT/DDA `C5` · resource area
+  `C6` · neighborhood change `C7` · lot SF `C12`.
+- **Logic (exporter computes):** CRA `C8` · construction type `C9` (as a formula) · bedroom mix
+  `H3:H6`/`I3:I6` · AMI mix (`J`) · avg unit sizes (method-dependent) · construction time (method-dependent).
+- **Hand (analyst enters):** acquisition price `C33`/`S16` · BIPOC `C11` · residential stories/FAR `E10`/`E11`.
+- **Deferred to the model:** Prevailing Wage `C10` — being added to the model; exporter does NOT set it.
+- **Default (left untouched):** manager's unit `I26` · 4% vs 9% path · financing layers `D59` ·
+  rent growth · expense growth · bond-test limit · applicable %/credit factor.
+
+### B1. Product type & bedroom mix — keyed on resource area
+| Resource area (DD `C6`) | Product | 0B | 1B | 2B | 3B |
 |---|---|---|---|---|---|
-| Large Family | 0% | 50% | 25% | 25% | matches the Kinzie example; assumes a 3BR floor **[CONFIRM CTCAC min]** |
-| Senior | ~15% | 85% | 0% | 0% | placeholder **[CONFIRM]** |
-| SRO / Special Needs | 100% 0B | — | — | — | placeholder **[CONFIRM]** |
-- Unit **count** = model-derived (NRSF ÷ avg unit size); we just set the **%** split.
-- Manager's unit: 1 per ~? units, 1BR **[CONFIRM ratio]**.
+| **High / Highest** | Large Family | 0% | 50% | 25% | 25% |
+| **Low / Moderate** | standard | 0% | 100% | 0% | 0% |
+- We set the % split (`I3:I6`); unit **count** stays model-derived. Manager's unit = Default (model handles).
 
-### B2. AMI / income mix — default first pass
-| Band | 30% | 50% | 60% | 70% | Notes |
-|---|---|---|---|---|---|
-| Default % of units | ? | ? | ? | ? | **[CONFIRM]** — model shows 30/50/60/70 bands present |
-- Adjust by **9% vs 4%** and tiebreaker target **[CONFIRM rule]**.
+### B2. AMI / income mix — exporter sets
+- **10% @30% AMI · 10% @50% · 80% @60%** (no 70% band).
 
-### B3. Construction type — keyed on stories (from lot SF + zoning)
-| Residential stories | Type | Notes |
+### B3. Construction type `C9` — formula off stories + method (template change, approved)
+Set `C9` to a live formula so it tracks the hand-entered stories and the file's build method:
+`=IF(<stories> > 5, "Type I", IF(AND(A36="Stick", <stories> = 5), "Type III", "Other"))`
+- `<stories>` = the residential-stories cell **[locate the `Pro_Forma` stories cell — intake noted Sheet1 `E10`]**.
+- Consequence: a 5-story deal is **Type III in the Stick file but "Other" in the Modular file** —
+  type legitimately differs by method (see B5).
+
+### B4. Avg unit sizes (NRSF/bdrm) — method-dependent
+| Bedroom | Stick (= template default) | Modular |
 |---|---|---|
-| ≤ 5–6 | **Type III** | stick-framed, default for mid-rise **[CONFIRM cutoff]** |
-| ≥ 6–7 or podium | **Type I** | concrete/podium **[CONFIRM]** |
-| special | Other | analyst override |
-- Stories/FAR projected from **lot SF** + zoning (model: FAR ≈ 3.5/5 × stories; NRSF = acres×43,560×FAR×0.8).
+| 1B | 497 | 497 |
+| 2B | 700 | **804** |
+| 3B | 900 | **994** |
+- Stick file: leave defaults. Modular file: exporter overrides 2B→804, 3B→994.
 
-### B4. Build method — ALWAYS produce both (Stick + Modular)
-- No decision — generate both. Only `A36` differs unless seniors say type/stories/timeline also flip (Q4).
-
-### B5. Financing structure — first-pass default
-| Condition | Structure | Notes |
+### B5. Build method — produce BOTH; these inputs differ by method
+| Input | Stick file | Modular file |
 |---|---|---|
-| Default | 4% + tax-exempt bond, `D59 = None` | **[CONFIRM default]** |
-| Small / competitive | 9% | **[CONFIRM size threshold]** |
-| SoLa contributes land | add Ground Lessor (`D59`) | **[CONFIRM]** |
-| Jurisdiction soft funds available | add Soft Debt | **[CONFIRM]** |
-| Large gap | add State Credits / B-Bond | **[CONFIRM]** |
+| `A36` | Stick | Modular |
+| Construction type `C9` (via B3 formula) | Type III @5 stories | Other @≤5 stories |
+| Avg 2B / 3B NRSF | 700 / 900 | 804 / 994 |
+| Construction time | **24 months** | **18 months** — **[locate duration cell, likely `Draws_Module`]** |
 
-### B6. Policy flags — defaults
-| Flag | Default | Driver to confirm |
-|---|---|---|
-| Prevailing Wage (`C10`) | No | deal size / financing **[CONFIRM]** |
-| BIPOC (`C11`) | No | **[CONFIRM]** |
-| CRA (`C8`) | No | **[CONFIRM]** |
+### B6. CRA `C8` — derived
+`CRA = Yes` if **neighborhood change `C7` = No** AND product is **not Large Family** (i.e.,
+resource area is Low/Moderate); otherwise **No**.
+
+### B7. Out of exporter scope (recap)
+- **Prevailing Wage** — model will add it. **Acquisition price / BIPOC / stories-FAR** — analyst.
+- **4%/9% · financing layers · growth · bond test · applicable %** — model defaults, untouched.
 
 ---
 
-## Part C — Dual-model output spec (Stick + Modular)
+## Part C — Dual-model output spec (Stick + Modular) — confirmed
 For each deal the exporter will:
-1. Fill the DD-derived **site inputs** (`Pro_Forma B2,C3:C7,C12` — see `UNDERWRITING_AUTOMATION.md`).
-2. Fill the **assumption inputs** from the confirmed Part-B logic (unit mix `H3:H6`/`I3:I6`,
-   AMI mix, construction type `C9`, financing `D59`, stories/FAR, policy flags).
-3. Produce **two files**, identical except `A36`:
-   - `<deal> — Stick.xlsm`  (`A36 = "Stick"`)
-   - `<deal> — Modular.xlsm` (`A36 = "Modular"`)
-   …and any other method-dependent inputs seniors flag in Q4.
-4. Hand both to the analyst to open & recalc in Excel (outputs at `C24:C30`).
+1. Write the DD **Auto** site inputs (`Pro_Forma B2, C3:C7, C12`).
+2. Compute the **Logic** inputs: CRA `C8`; bedroom mix `I3:I6` (B1); AMI mix (B2); construction
+   type `C9` as a formula (B3); and the method-specific unit sizes (B4) + construction time (B5).
+3. Leave **Hand** fields blank (acquisition price, BIPOC, stories/FAR) and **Default** /
+   model-handled fields untouched (incl. Prevailing Wage until the model adds it).
+4. Save **two files** — `<deal> — Stick.xlsm` and `<deal> — Modular.xlsm` — differing per B5.
+5. Analyst opens each, enters the Hand fields (esp. **stories**, which drives the `C9` formula),
+   recalcs in Excel; first-pass outputs at `C24:C30`.
 
 ## Status
-Draft prepared for senior review. Once Part A is answered / Part B red-lined, the rules
-become the exporter's assumption layer and the DD→underwriting→dual-model hand-off can be built.
+**Logic confirmed (2026-06-16); ready to build.** Two implementation lookups remain (do at build
+time, not senior questions): the `Pro_Forma` residential-stories cell and the construction-time
+(duration) cell. Then build the exporter: DD checklist (or `collect.py`) → filled `Pro_Forma`
+inputs → two saved models.
