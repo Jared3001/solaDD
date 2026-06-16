@@ -24,63 +24,142 @@ current QAP.
 
 ## Part A — Questions for senior analysts
 
-### 0. Product / set-aside type (the upstream driver)
-The filename ("Stick **Large Family**") shows product type drives a lot. Pin it first.
-- How do you decide a site's product type — **Large Family vs Senior vs Special
-  Needs / SRO / At-Risk** — from what we know at first pass (resource area, jurisdiction,
-  lot size, neighborhood, surrounding need)?
-- Is there a **default product type** for a typical SoLa acquisition, or is it always a judgment call?
-- Does product type get locked before underwriting, or do you sometimes run more than one?
+**Framing.** The automated DD checklist hands the model a fixed set of site facts. What it
+*can't* do is decide the deal's unit mix, construction type, and financing structure — those
+are your calls. My goal with these questions is to learn **which DD outputs you actually read
+to make each of those calls, and the rule you apply**, so I can encode "DD checklist → deal
+assumptions" instead of guessing. So please answer in the form *"I look at X (and Y) on the
+checklist, and if it's ___ then ___."* Where a decision needs something the checklist doesn't
+capture, tell me what that missing input is and where it comes from.
 
-### 1. Unit mix — bedroom distribution  (model: `Pro_Forma!H3:H6` counts, `I3:I6` %)
-- For a **Large Family** deal, what's your **default bedroom split** (0/1/2/3BR)? Is there
-  a minimum 3BR (or 2BR+) share you hold to (CTCAC set-aside / jurisdiction)?
-- Does the split change with **resource area** (e.g., more family units in High/Highest),
-  **jurisdiction**, or **site size / unit count**? How?
-- Do you ever model **studios (0B)** for Large Family, or only Senior/SRO?
-- What **average unit sizes (NRSF)** do you assume per bedroom? (Model currently:
-  0B≈402, 1B≈497, 2B≈700, 3B≈900 NRSF.) Are these standard or do they flex by method/site?
-- The **manager's unit(s)** — how many, and which bedroom type, by unit count?
+**What the checklist already gives you (the inputs you have to work from):**
+- *Site/identity:* address, APN, **city/jurisdiction**, **county**, **geographic pool**
+  (CDLAC region — City of LA vs Balance of LA County, etc.), **lot SF / land area**.
+- *Programs & affordability geography:* **QCT**, **DDA** (each with current + prior year),
+  **resource area** (Highest / High / Moderate / Low), **neighborhood change area**,
+  **opportunity zone**.
+- *Zoning / entitlement (LA City):* **zoning + height district**, **TOC tier**, **½-mile
+  major transit**, **specific plan / overlay**, **[Q] conditions**, council district.
+- *Hazards / physical:* **flood zone**, **very-high fire**, **methane zone**, **liquefaction**,
+  **Alquist-Priolo fault**, **oil/gas wells**, **USTs/contamination**, **slope/grade**.
+- *Tenancy (when desk-filled):* existing residential units, units to vacate at COE,
+  rent-stabilized, owner-occupied, **SB8 replacement units**.
 
-### 2. Unit mix — AMI / income mix  (model: `Pro_Forma!J` column AMI bands; `Sheet1!E24` 0.3/0.5/0.6/0.7)
-- What's your **default AMI band mix** (% of units at 30 / 50 / 60 / 70% AMI) for a
-  first pass? Does it differ 9% vs 4%?
-- What drives shifts in the AMI mix — **tiebreaker optimization, AHSC/program overlays,
-  jurisdiction requirements**, a target average affordability?
-- Any **hard floors/ceilings** (e.g., min % at ≤30% AMI for a program)? **[CONFIRM]**
-- Is the **70% band** a real target or just a model placeholder?
+---
 
-### 3. Construction type — Type I / III / Other  (model: `Pro_Forma!C9`)
-- What's the rule of thumb for **Type III vs Type I**? Is it purely **stories / height /
-  podium**, or also density, cost, or unit count? (Common heuristic: Type III stick up to
-  ~5–6 stories; Type I concrete above, or with podium. **[CONFIRM]**)
-- When would you pick **"Other"**?
-- Does construction **type** ever differ between the Stick and Modular versions of the
-  same deal, or is type held constant and only the **method** (A36) changes?
-- What **residential stories / FAR** do you assume at first pass from lot size + zoning?
-  (Model: stories≈5, FAR≈3.5/5×stories, NRSF = acres×43,560×FAR×0.8.)
+### 1. Unit mix — how the DD checklist shapes the unit program
+**What the model needs:** product/set-aside type, the bedroom split (`Pro_Forma!H3:H6` counts,
+`I3:I6` %), the AMI/income band mix (`J` column: 30/50/60/70% AMI), average unit sizes per
+bedroom, and the manager's unit(s). The model derives the unit *count* from NRSF (lot area ×
+FAR × efficiency); we set the *mix*.
 
-### 4. Build method — Stick vs Modular  (model: `Pro_Forma!A36`; always BOTH)
-- Confirm: you want **both** modeled and saved every time? Any deal where only one applies?
-- Besides the A36 toggle, does switching to Modular change any **other inputs** we'd set
-  (stories, type, unit sizes, timeline, contingency), or does the template handle the full
-  cost/time delta off A36 alone?
-- Roughly, what **cost and schedule delta** should Modular show vs Stick (sanity check)?
+1. **Reading product type off the checklist.** This site is a "Large Family" deal. Walk me
+   through how you land on a product type (Large Family vs Senior vs Special-Needs/SRO vs
+   At-Risk) from the checklist alone — which fields tip it? For example, does **resource area**,
+   **jurisdiction / geographic pool**, achievable **density (zoning + lot SF)**, **TOC tier**,
+   or the **surrounding neighborhood** push you toward family vs senior? Is there a default
+   product type for a typical SoLa acquisition, and do you ever carry more than one product
+   type forward?
+2. **Bedroom split, and what moves it.** Once the product type is set, what bedroom split do
+   you start from (e.g., for Large Family), and **which checklist outputs change it**? Concretely:
+   does a **Highest/High resource area** push more 3BR (family-friendly / tiebreaker)? Does the
+   **jurisdiction, specific-plan overlay, or [Q] conditions** impose or cap a bedroom mix? Does
+   the **CTCAC Large-Family set-aside** dictate a minimum 3BR (or 2BR+) share — and what's the
+   current threshold? Do you ever model studios (0B) for Large Family, or are studios only for
+   Senior/SRO?
+3. **How the site bounds the count and therefore the mix.** The model sizes units from lot SF
+   and FAR. In practice, do you let **lot SF + zoning/height district + TOC density bonus**
+   drive the count the way the model does, or do you cap it by **parking, jurisdiction max-units,
+   or a unit-size floor**? Which checklist fields set that ceiling, and does hitting a cap change
+   the bedroom mix (e.g., fewer large units to fit the count)?
+4. **Average unit sizes (NRSF per bedroom).** The model uses ~402 / 497 / 700 / 900 NRSF for
+   0/1/2/3BR. Are those your standard assumptions, or do they flex by **jurisdiction, resource
+   area, product type, or build method (Stick vs Modular)**? Same question for the **manager's
+   unit(s)** — how many and which bedroom type, scaled to unit count?
+5. **AMI / income band mix.** What's your first-pass split across 30/50/60/70% AMI, and **which
+   checklist outputs inform it** versus what's purely program-driven? Specifically: do
+   **resource area + geographic pool / CDLAC region** (tiebreaker competitiveness), **QCT/DDA**,
+   or **jurisdiction overlays (AHSC, local requirements)** move the AMI mix? Are there hard
+   floors/ceilings (e.g., a minimum ≤30% AMI share), and is the 70% band a real target or a
+   placeholder?
+6. **Existing tenancy / SB8.** When the checklist shows existing residential, rent-stabilized,
+   or SB8 replacement units, does that constrain the mix (e.g., bedroom-matched replacement
+   units, or a deeper-affordability requirement)? How should I fold that in?
 
-### 5. Financing structure  (model: `Pro_Forma!D59` {Ground Lessor, Soft Debt, State Credits, B-Bond, None}; 4%/9%; bond test `C21`/`Sheet1!F16`)
-- How do you decide **9% vs 4%+tax-exempt bonds** at first pass? Is there a **deal-size or
-  gap threshold**? (Common: larger deals → 4%/bond; smaller/competitive → 9%. **[CONFIRM]**)
-- When do you layer **Ground Lessor / Soft Debt / State Credits / B-Bond** (D59)? What signals
-  each (gap size, jurisdiction soft funds, SoLa land contribution, state credit availability)?
-- What's the **default financing structure** for a typical first pass if nothing special applies?
-- **Bond test limit** (model 27.5%) and **applicable percentage / tax-credit factor** — are
-  these fixed assumptions or do you set them per deal?
-- **Acquisition price** — confirmed source is the OM/broker (we won't derive it); any default
-  (e.g., land residual) when price isn't set yet?
+---
 
-### 6. Policy flags  (model: `Pro_Forma!C8` CRA, `C10` Prevailing Wage, `C11` BIPOC)
-- **Prevailing Wage** — when is it Yes (deal size, financing, jurisdiction)? **[CONFIRM]**
-- **BIPOC** and **CRA** — what determines each, and do they change costs/scoring materially?
+### 2. Construction type — how the DD checklist drives structure
+**What the model needs:** construction type (`Pro_Forma!C9` = Type I / III / Other) and the
+residential stories / FAR that flow into NRSF (model defaults: ~5 stories, FAR ≈ 3.5/5 × stories,
+NRSF = acres × 43,560 × FAR × 0.8). Build *method* (Stick/Modular) is handled separately in §3.
+
+1. **Stories & FAR from the checklist.** How do you project **residential stories and FAR** at
+   first pass from the DD outputs — specifically the **zoning + height district**, **lot SF**,
+   **TOC tier / density bonus**, and any **specific-plan/overlay**? Is the model's ~5-story /
+   FAR-3.5 default just a placeholder, or do you actually read the achievable envelope off the
+   height district and bonuses per site?
+2. **Type I vs Type III — the rule.** Is the Type I vs III call essentially a function of the
+   stories/height you just derived (e.g., Type III stick up to ~5–6 stories, Type I concrete
+   above that or whenever there's a podium), or do other checklist factors weigh in? Where's
+   the cutoff, and when would you ever pick "Other"?
+3. **Do hazards change the *type* or just the *cost*?** This is the key one for me — for each
+   hazard the checklist flags, tell me whether it **changes construction type/structure** or just
+   **adds a cost line**: **methane zone** (sub-slab membrane / podium?), **liquefaction** and
+   **Alquist-Priolo fault** (foundation/structural system?), **slope/grade** (stepped foundation,
+   retaining?), **flood zone** (raised finished floor / podium?). I want to know which of these
+   should flip Type III → Type I (or "Other") versus which I should leave to the cost side.
+4. **Does type differ between the two models?** For the Stick vs Modular pair (§3) — do you hold
+   construction *type* constant and only change the method, or can the type itself differ between
+   the Stick and Modular versions of the same site?
+
+---
+
+### 3. Build method — Stick & Modular (always produce both)
+**What the model needs:** the method toggle `Pro_Forma!A36` = "Stick" or "Modular"; the team
+wants both saved separately.
+
+1. Confirm you want **both** modeled every time — or are there site conditions (from the
+   checklist) where only one method is viable (e.g., a constrained/odd-shaped lot, height, or
+   jurisdiction that rules modular in/out)?
+2. Besides flipping `A36`, does switching to Modular require changing any **other inputs** we'd
+   set — stories, construction type, unit sizes, timeline, contingency — or does the template
+   absorb the full cost/schedule delta from the toggle alone?
+3. As a sanity check, what cost and schedule delta should Modular show vs Stick?
+
+---
+
+### 4. Financing structure — how the DD checklist informs the capital stack
+**What the model needs:** the 4% vs 9% path, the financing layers (`Pro_Forma!D59` =
+{Ground Lessor, Soft Debt, State Credits, B-Bond, None}), and the bond-test limit
+(`C21` / `Sheet1!F16`, model 27.5%).
+
+1. **9% vs 4%+bond — from the checklist.** At first pass, which DD outputs push a deal toward
+   **9% (competitive) vs 4% + tax-exempt bonds**? Specifically: does **deal size** (inferred from
+   **lot SF / unit count**) drive it (larger → 4%/bond)? Does **QCT/DDA** (the 30% basis boost)
+   tilt you toward 4%? Do **resource area + geographic pool / CDLAC region** (9% tiebreaker
+   competitiveness) decide it? Give me the rule of thumb and any thresholds.
+2. **What triggers each financing layer (`D59`).** For each — **Ground Lessor, Soft Debt, State
+   Credits, B-Bond** — what signals it, and **can I infer that signal from the checklist**? E.g.:
+   does SoLa owning/contributing the land (ground lease) trigger Ground Lessor? Does the
+   **jurisdiction / geographic pool** (City of LA vs Balance of County soft-funds availability)
+   trigger Soft Debt? When do State Credits or a B-Bond come in — gap size, or something
+   checklist-visible? I want to separate "inferable from DD" from "purely deal-side."
+3. **Default structure.** If nothing special applies, what's the default financing structure for
+   a first pass?
+4. **Fixed vs per-deal knobs.** Are the **bond-test limit (27.5%)** and the **applicable
+   percentage / tax-credit factor** fixed assumptions, or do you set them per deal (and off what)?
+5. **Acquisition price.** Confirmed this comes from the OM/broker and isn't something we derive —
+   but is there a fallback (e.g., a land-residual or $/unit placeholder) you use before a price
+   is set, and does any checklist field inform that placeholder?
+
+---
+
+### 5. Policy flags  (model: `Pro_Forma!C8` CRA, `C10` Prevailing Wage, `C11` BIPOC)
+- **Prevailing Wage** — what determines Yes/No, and is any of it checklist-visible (deal size,
+  financing path, jurisdiction)?
+- **CRA** — is this a designation we could *derive* (a community-revitalization/reinvestment area
+  with a public layer), or is it a manual/local call? What sets it?
+- **BIPOC** — what determines it, and does it materially move cost or scoring?
 
 ---
 
