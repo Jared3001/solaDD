@@ -12,6 +12,12 @@ Usage:
       readers, and print the resulting states + cells.
   python build/collect.py path/to/property.xlsx [address]
       run against a real per-property workbook (address read from C3 if omitted).
+  python build/collect.py path/to/property.xlsx "11070 Borden Ave; 11080 Borden Ave; ..."
+      ASSEMBLAGE — run several addresses as ONE site (separate with ';'). Point /
+      tract readers run on the primary (first) parcel; land_sf is SUMMED and every
+      APN listed across all parcels. Flags if the parcels span multiple census
+      tracts (which makes the tract-based fields — QCT/DDA/resource — ambiguous).
+      This is the address-based alternative to identifying a multi-parcel site.
 
 A field is automated only if it appears in READERS; everything else keeps the
 state the template/generator assigned (DESK-PENDING, BROWSER-PENDING, etc.).
@@ -99,21 +105,90 @@ SD_READERS = {
 }
 
 
+def _parse_addresses(s):
+    """A ';'-separated string -> assemblage list; a single address -> itself."""
+    if isinstance(s, str) and ";" in s:
+        return [a.strip() for a in s.split(";") if a.strip()]
+    return s
+
+
+def _assemble_parcels(geos):
+    """Aggregate the parcel-level fields across an assemblage of addresses run as
+    one site: SUM gross lot area over the unique parcels and list every APN.
+    Returns {field_id: outcome} (collect applies them, overriding the primary's).
+    Point/tract fields are NOT aggregated — they run on the primary parcel."""
+    parts, fails, seen = [], [], set()
+    for g in geos:
+        addr = g.get("matched_address")
+        try:
+            ap = jurisdiction.apn(g)["answer"]
+        except Exception:
+            ap = None
+        try:
+            lo = parcel.land_sf(g)
+        except Exception as e:
+            fails.append((ap or addr, str(e)))
+            continue
+        key = ap or addr
+        if key in seen:                 # two addresses on the same parcel -> count once
+            continue
+        seen.add(key)
+        parts.append({"addr": addr, "apn": ap, "area": lo["answer"],
+                      "matched": lo.get("state", "VERIFIED") == "VERIFIED"})
+
+    clean = bool(parts) and all(p["matched"] for p in parts) and not fails
+    state = "VERIFIED" if clean else "JUDGMENT"
+    out = {}
+    out["address"] = ("ok", {"answer": "; ".join(p["addr"] for p in parts)
+                             or "; ".join(g.get("matched_address", "?") for g in geos),
+                             "notes": f"Assemblage of {len(geos)} addresses run as one site. "
+                                      f"Source: U.S. Census geocoder."})
+    apns = [p["apn"] for p in parts if p["apn"]]
+    out["apn"] = ("ok", {"answer": "; ".join(apns) if apns else "(unresolved)", "state": state,
+                         "notes": f"{len(apns)} parcels in assemblage: {', '.join(apns) or 'none resolved'}. "
+                                  f"Source: Assessor parcels."})
+    if not parts:
+        out["land_sf"] = ("fail", LookupError("no assemblage parcels could be sized"))
+    else:
+        total = sum(p["area"] for p in parts)
+        lines = "; ".join(f"{p['apn'] or p['addr']}={p['area']:,} sf" for p in parts)
+        note = (f"Assemblage gross land area {total:,} sf = sum of {len(parts)} parcels [{lines}]. "
+                f"GROSS — reconcile buildable vs ALTA survey. Source: LA City/County Assessor parcels.")
+        if fails:
+            note += " UNSIZED: " + "; ".join(a for a, _ in fails) + " — verify."
+        out["land_sf"] = ("ok", {"answer": total, "state": state, "notes": note})
+    return out
+
+
 def collect(wb_path, address, property_id=None, workers=10):
     schema = yaml.safe_load((ROOT / "canonical/schema.yaml").read_text())
     by_id = {f["id"]: f for f in schema["fields"]}
-    geo = geocode(address)
+    if isinstance(address, str):
+        address = _parse_addresses(address)        # "a; b" -> ["a", "b"] (assemblage); single -> str
+    addresses = list(address) if isinstance(address, (list, tuple)) else [address]
+    geos = [geocode(a) for a in addresses]
+    geo = geos[0]                       # primary parcel drives all point/tract readers
+    multi = len(geos) > 1
     print(f"geocoded: {geo['matched_address']}  tract {geo['geoid']}  "
-          f"({geo['lat']:.5f},{geo['lon']:.5f})\n")
+          f"({geo['lat']:.5f},{geo['lon']:.5f})")
+    if multi:
+        print(f"ASSEMBLAGE: {len(geos)} addresses run as one site (primary above):")
+        for g in geos[1:]:
+            print(f"  + {g['matched_address']}  tract {g['geoid']}")
+    print()
+
     active = dict(READERS)
+    if multi:                          # parcel fields are aggregated across the assemblage, not snapped to primary
+        for fid in ("address", "apn", "land_sf"):
+            active.pop(fid, None)
     if zimas.in_la_city(geo):       # also warms the parcel snap the ZIMAS readers share
         active.update(ZIMAS_READERS)
-        print("parcel is in LA City -> running ZIMAS block\n")
+        print("primary parcel is in LA City -> running ZIMAS block\n")
     elif _county_basename(geo) == "San Diego":
         active.update(SD_READERS)
-        print("parcel is in San Diego -> running SD block\n")
+        print("primary parcel is in San Diego -> running SD block\n")
     else:
-        print("parcel not in LA City / San Diego -> municipal block skipped (route to local planning)\n")
+        print("primary parcel not in LA City / San Diego -> municipal block skipped (route to local planning)\n")
     for _warm in (nc._load, tcac._load_index):   # warm the shared bulk caches once (thread-safe)
         try:
             _warm()
@@ -127,12 +202,24 @@ def collect(wb_path, address, property_id=None, workers=10):
     with ThreadPoolExecutor(max_workers=workers) as ex:
         outcomes = dict(ex.map(_fetch, list(active.items())))
 
+    # Assemblage — aggregate the parcel fields across all addresses + flag tract divergence.
+    if multi:
+        agg = _assemble_parcels(geos)
+        tracts = sorted({g["geoid"] for g in geos})
+        if len(tracts) > 1:
+            warn = (f"ASSEMBLAGE SPANS {len(tracts)} CENSUS TRACTS ({', '.join(tracts)}) — "
+                    f"tract-based fields (QCT/DDA/resource/opportunity zone/neighborhood change) "
+                    f"reflect the PRIMARY parcel only; verify per parcel.")
+            print("  ⚠ " + warn + "\n")
+            agg["address"][1]["notes"] += " " + warn
+        outcomes.update(agg)
+
     # Phase 2 — apply all outcomes to the workbook in a single open/save.
     wb = load_workbook(wb_path)
     ws, log = wb["Site DD"], wb["State Log"]
     ts = datetime.datetime.now().isoformat(timespec="seconds")
     results = {}
-    for fid in active:
+    for fid in outcomes:
         field = by_id[fid]
         state = apply_outcome(ws, log, field, outcomes[fid], property_id=property_id or "DEMO", ts=ts)
         results[fid] = (field["answer_cell"], state)
@@ -154,7 +241,7 @@ def _dump(wb_path, results):
 if __name__ == "__main__":
     args = sys.argv[1:]
     if args and args[0] == "--demo":
-        address = " ".join(args[1:]) or "11300 S Main St, Los Angeles, CA 90061"
+        address = _parse_addresses(" ".join(args[1:]) or "11300 S Main St, Los Angeles, CA 90061")
         tmp = ROOT / "build" / "_collect_demo.xlsx"
         shutil.copy(ROOT / "template/Checklist_BLANK_master.xlsx", tmp)
         results, _ = collect(tmp, address)
@@ -163,7 +250,7 @@ if __name__ == "__main__":
     elif args:
         from openpyxl import load_workbook
         wb = args[0]
-        address = " ".join(args[1:]) or load_workbook(wb)["Site DD"]["C3"].value
+        address = _parse_addresses(" ".join(args[1:]) or load_workbook(wb)["Site DD"]["C3"].value)
         results, _ = collect(wb, address)
         _dump(wb, results)
     else:

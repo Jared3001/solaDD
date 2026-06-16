@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.15-draft (2026-06-16) — multi-address assemblage in the DD engine
+`collect.py` can now run **several addresses as one site** — the address-based
+alternative to the APN-keyed web assemblage. Pass a `;`-separated address string
+(CLI or any caller; `collect()` splits it internally):
+- Geocodes every address; **point/tract readers run on the primary (first) parcel**.
+- **`land_sf` is summed** across the unique parcels (deduped by APN) and **every APN
+  is listed**; `address` shows all addresses. New `_assemble_parcels()` does the
+  aggregation; `_parse_addresses()` does the split.
+- **Flags when the assemblage spans multiple census tracts** — QCT/DDA/resource/OZ/
+  neighborhood-change reflect the primary parcel only, so they're called out for
+  per-parcel verification. Lands JUDGMENT (not VERIFIED) if any parcel was a
+  nearest-fallback snap or one couldn't be sized.
+- Verified end-to-end: two S Main St parcels summed (24,220 + 12,893 = 37,113 sf),
+  both APNs listed, flows through `underwrite.py` to model `C12`. Addresses the
+  parcel-selection gap the 3-deal QC found (Colima/Bellflower assemblages).
+- NOTE: the web front end (`web/jobs.py`) still does assemblage by **APN**
+  (`run_assemblage`); wiring the multi-address path into the web UI is a follow-up.
+
 ## v0.14-draft (2026-06-16) — underwriting exporter (DD → two pro-forma models)
 First-pass underwriting models now auto-generate from a completed DD checklist.
 - **New `build/underwrite.py`** — reads a DD checklist (`Site DD` sheet) and writes

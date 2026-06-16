@@ -10,4 +10,6 @@ build/_*.json
 build/_*.out
 build/_uw*/
 build/_underwriting/
+build/_qc/
+build/_qc_*.py
 build/*.xlsm
