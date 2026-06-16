@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.11-draft (2026-06-15)
+- hud.qct / hud.dda now report BOTH the current and prior designation year and
+  land JUDGMENT when they differ. QCT/DDA are re-designated annually (effective
+  Jan 1) and flip year to year; the governing year for a LIHTC deal is its
+  allocation/bond/binding-commitment year (+ hold-harmless), not simply the
+  current calendar year. So a single-year answer caused false human/tool
+  conflicts (e.g. Kinzie DDA: 2026 No vs an analyst's 2025 Yes). Now the cell
+  shows "2026: No (current); 2025: Yes" and is flagged JUDGMENT to confirm the
+  deal year. Year is read from each layer's `name` (HUD's service-name suffix and
+  description are unreliable — the `_2026` QCT description still says "for 2024").
+
 ## v0.10-draft (2026-06-15)
 Scale-test fixes (the 9-site batch surfaced these):
 - geocoder: OSM/Nominatim fallback when the Census geocoder can't match an
