@@ -43,6 +43,14 @@ def too_large(_):
     return jsonify({"error": f"Upload too large (max ~{_OM_MAX_MB} MB). Compress the OM PDF and retry."}), 413
 
 
+# ModularZ (AI proforma/underwriting tool) talks to Google Gemini straight from
+# the browser, so the key is necessarily client-side. We inject it from an env
+# var rather than hard-coding it in the template; the fallback is the key the
+# prototype shipped with. SECURITY: that fallback key is exposed in page source —
+# rotate it and set GEMINI_API_KEY in Railway, then drop the fallback.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+
 def login_required(f):
     @functools.wraps(f)
     def wrapper(*a, **k):
@@ -81,6 +89,14 @@ def logout():
 @login_required
 def index():
     return render_template("index.html", sections=jobs.SECTIONS, sources=jobs.SOURCE_CATALOG)
+
+
+@app.get("/modularz")
+@login_required
+def modularz():
+    # Unified ModularZ tool (Dashboard look + Gemini backend). Self-contained
+    # page; only the Gemini key is templated in.
+    return render_template("modularz.html", gemini_key=GEMINI_API_KEY)
 
 
 @app.post("/api/run")

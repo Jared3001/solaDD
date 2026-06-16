@@ -16,6 +16,10 @@
       <span class="brand-sep">/</span>
       <span class="brand-title">Site DD Feasibility</span>
     </div>
+    <nav class="tool-nav">
+      <a href="{{ url_for('index') }}" class="tool-link active">Feasibility Study</a>
+      <a href="{{ url_for('modularz') }}" class="tool-link">ModularZ</a>
+    </nav>
     <div class="topbar-right">
       <span id="health" class="health" title="Checking…"><span class="dot"></span><span class="health-label">…</span></span>
       <a class="logout" href="{{ url_for('logout') }}">Sign out</a>

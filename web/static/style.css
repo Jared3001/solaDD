@@ -75,6 +75,15 @@ h1, .brand-mark, .tab, .run-btn, label, th, .phase, .kicker {
 .brand-sep { color: var(--amber); margin: 0 8px; font-weight: 700; }
 .brand-title { font-family: "Source Serif 4", serif; color: #cdd6e6; }
 .topbar-right { display: flex; align-items: center; gap: 18px; }
+
+/* cross-tool nav (Feasibility Study | ModularZ) */
+.tool-nav { display: flex; gap: 6px; margin: 0 auto 0 28px; }
+.tool-link {
+  color: #cdd6e6; text-decoration: none; font-family: "Archivo", system-ui, sans-serif;
+  font-weight: 700; font-size: 13px; padding: 6px 12px; border-radius: 6px; transition: .15s;
+}
+.tool-link:hover { background: rgba(255,255,255,.08); color: #fff; }
+.tool-link.active { background: var(--amber); color: var(--navy); }
 .logout { color: #cdd6e6; text-decoration: none; font-size: 14px; }
 .logout:hover { color: #fff; text-decoration: underline; }
 
