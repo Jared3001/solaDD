@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.13-draft (2026-06-16) — San Diego expansion complete (parity with LA)
+A San Diego County address now auto-fills the same ~37 fields as LA (only the 3
+LA-only zoning concepts are N/A). Built in parallel:
+- **`resource_area` is now statewide** (`tcac.py`). The old endpoint was LA County's
+  republished copy (FIPS 06037 only — 0 San Diego tracts). Switched to the statewide
+  2026 CTCAC/HCD Opportunity Map: the official UC Berkeley OBI GeoJSON (11,337 tracts,
+  all 58 counties) — the SAME file `nc.py` reads. Disk-cached to `_cache/tcac_2026.json`
+  (slim {fips: oppcat/region/pov_seg_flag}) and pre-warmed in collect, mirroring nc.py,
+  so the 39 MB download happens once. Works for SD and LA. (Every public ArcGIS copy of
+  the TCAC map is single-county; the OBI GeoJSON is the only statewide source.)
+- **New `build/sources/sandiego.py`** — the San Diego municipal block (SD analog of the
+  LA ZIMAS block), City-of-San-Diego scope (off-city → manual). Readers: `zoning`
+  (Base Zones), `specific_plan_overlay` (DSD Zoning_Overlay), `council_supervisor_district`
+  (DoIT_Public), `historic_status` (Historic_Preservation_Resources), `toc_tier_la`
+  ←Transit Priority Area, `half_mile_major_transit` (TPA = SB743 ½-mi-of-major-transit),
+  `tier_transit_verification`. Wired into `collect.py` as `SD_READERS`, gated by
+  county == San Diego (mirrors the `in_la_city` ZIMAS gate).
+- **`airport.py`** gained a San Diego branch (City DSD/Airports "Airport Influence Areas")
+  — `airport_hazard_zone` now resolves for SD instead of routing to manual. LA path intact.
+- **`assemblage.py`** works for San Diego: auto-detects LA vs SD per APN (tries LA City
+  Parcels, falls back to SANDAG), sizes combined land area via `sd_parcel.parcel_info`,
+  and aggregates `{**READERS, **SD_READERS}` for SD blocks (ZIMAS for LA). LA unchanged.
+- QA caveats: `half_mile_major_transit` derives from the TPA polygon (the SANDAG Major
+  Transit Stops service was dead; a TPA is statutorily within ½ mi of a major transit
+  stop). `historic_status` flags pre-1979 structures for manual HRB eligibility.
+- Verified end-to-end: full SD `collect.py` run all-VERIFIED (slope JUDGMENT as designed);
+  SD assemblage (2 North Park APNs → 29,148.9 sf, full aggregation); LA collect +
+  assemblage regression-green.
+
 ## v0.12-draft (2026-06-16) — San Diego expansion, step 1: parcel keystone
 - New `build/sources/sd_parcel.py` — San Diego County `apn` + `land_sf` via SANDAG's
   countywide Hosted/Parcels layer (the SD analog of LA City Parcels). Address-aware

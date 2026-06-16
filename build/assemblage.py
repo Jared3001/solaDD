@@ -38,8 +38,15 @@ import yaml
 import _arcgis as ag
 from geocoder import geocode_point
 from runner import run_reader
-from collect import READERS, ZIMAS_READERS
+# SD_READERS is being added to collect.py concurrently by another agent; import it
+# defensively so this tool doesn't crash if it isn't present yet.
+try:
+    from collect import READERS, ZIMAS_READERS, SD_READERS
+except ImportError:
+    from collect import READERS, ZIMAS_READERS
+    SD_READERS = {}
 import zimas, nc
+import sd_parcel
 
 LACITY_PARCELS = "https://maps.lacity.org/lahub/rest/services/Landbase_Information/MapServer"
 PARCEL_LAYER = 5   # "Parcels" — geometry area in EPSG:2229 reproduces ZIMAS lot area
@@ -65,8 +72,9 @@ def _ring_area_sf(rings):
     return abs(tot)
 
 
-def parcel_info(apn: str) -> dict:
-    """Resolve an APN to {apn, bpp, n_lots, land_sf, lon, lat, geoid}."""
+def _parcel_info_la(apn: str) -> dict:
+    """Resolve an APN against LA City Parcels (BPP, EPSG:2229). Returns the parcel
+    dict (with jurisdiction='LA') or raises LookupError if the APN isn't there."""
     bpp = _norm(apn)
     where = f"BPP='{bpp}'"
     feet = ag.query(LACITY_PARCELS, PARCEL_LAYER, where=where, return_geometry=True,
@@ -89,10 +97,49 @@ def parcel_info(apn: str) -> dict:
             best_pt = (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
     lon, lat = best_pt
     geo = geocode_point(lon, lat)
-    return {"apn": apn, "bpp": bpp, "n_lots": len(feet), "land_sf": round(land_sf, 1),
+    return {"apn": apn, "jurisdiction": "LA", "bpp": bpp, "n_lots": len(feet),
+            "land_sf": round(land_sf, 1),
             "lon": lon, "lat": lat, "geoid": geo["geoid"],
             "state_fips": geo["state_fips"], "county_fips": geo["county_fips"],
             "place": geo.get("place"), "matched_address": geo["matched_address"]}
+
+
+def _parcel_info_sd(apn: str) -> dict:
+    """Resolve an APN against SANDAG County Parcels (EPSG:2230). sd_parcel returns
+    {apn, n_lots, land_sf, lon, lat} but no tract/FIPS, so we fill geoid/state_fips/
+    county_fips/place/matched_address from geocode_point on the centroid — the same
+    geo dict the statewide readers consume. Returns dict with jurisdiction='SD'."""
+    info = sd_parcel.parcel_info(apn)   # raises LookupError if not in SANDAG
+    lon, lat = info["lon"], info["lat"]
+    if lon is None or lat is None:
+        raise LookupError(f"SANDAG parcel {apn} has no centroid for geo resolution")
+    geo = geocode_point(lon, lat)
+    return {"apn": info["apn"], "jurisdiction": "SD", "bpp": _norm(apn),
+            "n_lots": info["n_lots"], "land_sf": info["land_sf"],
+            "lon": lon, "lat": lat, "geoid": geo["geoid"],
+            "state_fips": geo["state_fips"], "county_fips": geo["county_fips"],
+            "place": geo.get("place"), "matched_address": geo["matched_address"]}
+
+
+def parcel_info(apn: str) -> dict:
+    """Resolve an APN to a parcel dict, auto-detecting jurisdiction.
+
+    LA-City and San Diego APNs are both 10 digits (just different dash grouping:
+    '5082-024-018' vs '453-122-10-00'), so length can't disambiguate them. Instead
+    we detect by which parcel layer actually resolves the APN: try LA City Parcels
+    (BPP) first, and if that returns nothing, try SANDAG. The result carries a
+    'jurisdiction' marker ('LA'/'SD') so the reader aggregation can pick the right
+    municipal block (ZIMAS for LA, SD_READERS for San Diego)."""
+    try:
+        return _parcel_info_la(apn)
+    except LookupError:
+        pass
+    try:
+        return _parcel_info_sd(apn)
+    except LookupError:
+        pass
+    raise LookupError(
+        f"APN {apn} not found in LA City Parcels or SANDAG County Parcels")
 
 
 def _parcel_geo(parcel):
@@ -106,16 +153,28 @@ def _run_all_parcels(parcels, workers=12):
 
     Snaps are pre-warmed per parcel (different cache keys, no race) and the
     Neighborhood-Change file once, so the parallel fan-out only does fresh reads.
+
+    Statewide READERS run on every parcel; the municipal block is jurisdiction-
+    specific — ZIMAS for LA parcels, SD_READERS for San Diego parcels. (Mixed-
+    jurisdiction assemblages are unusual but handled per-parcel here.)
     """
-    readers = {k: v for k, v in {**READERS, **ZIMAS_READERS}.items() if k not in _SITE_LEVEL}
+    base = {k: v for k, v in READERS.items() if k not in _SITE_LEVEL}
+    muni = {
+        "LA": {k: v for k, v in ZIMAS_READERS.items() if k not in _SITE_LEVEL},
+        "SD": {k: v for k, v in SD_READERS.items() if k not in _SITE_LEVEL},
+    }
     try:
         nc._load()
     except Exception:
         pass
-    with ThreadPoolExecutor(max_workers=min(6, len(parcels))) as ex:
-        list(ex.map(lambda p: _warm(_parcel_geo(p)), parcels))
+    # Only LA parcels share the ZIMAS snap cache; SD readers carry their own snap.
+    la_parcels = [p for p in parcels if p.get("jurisdiction") == "LA"]
+    if la_parcels:
+        with ThreadPoolExecutor(max_workers=min(6, len(la_parcels))) as ex:
+            list(ex.map(lambda p: _warm(_parcel_geo(p)), la_parcels))
 
-    tasks = [(p, fid, fn) for p in parcels for fid, fn in readers.items()]
+    tasks = [(p, fid, fn) for p in parcels
+             for fid, fn in {**base, **muni.get(p.get("jurisdiction"), {})}.items()]
 
     def _task(t):
         p, fid, fn = t
@@ -144,7 +203,13 @@ def _warm(geo):
 
 def _aggregate(fid, atype, per_parcel):
     """Collapse per-parcel answers into one site answer + note + state."""
-    vals = {p["apn"]: per_parcel[p["apn"]][fid] for p in per_parcel["_order"]}
+    # A municipal field (ZIMAS / SD) only runs on parcels of that jurisdiction, so
+    # only aggregate over parcels that actually produced this field.
+    vals = {p["apn"]: per_parcel[p["apn"]][fid]
+            for p in per_parcel["_order"] if fid in per_parcel[p["apn"]]}
+    if not vals:
+        return {"answer": None, "state": "MANUAL",
+                "notes": "no parcel ran this field (jurisdiction has no reader for it)"}
     fails = [a for a, v in vals.items() if v["state"] == "TOOL-FAIL"]
     ok = {a: v for a, v in vals.items() if v["state"] != "TOOL-FAIL"}
     if not ok:
@@ -221,7 +286,20 @@ def assess(wb_path, apns, property_id=None):
     print(f"{'field':30} {'SITE answer':24} {'state':10} detail")
     print("-" * 100)
     agg = {}
-    for fid in [*READERS, *ZIMAS_READERS]:
+    # Union of every reader that could have run across the assemblage's parcels:
+    # statewide + whichever municipal blocks are present (ZIMAS for LA, SD for SD).
+    have_la = any(p.get("jurisdiction") == "LA" for p in parcels)
+    have_sd = any(p.get("jurisdiction") == "SD" for p in parcels)
+    fids = list(READERS)
+    if have_la:
+        fids += list(ZIMAS_READERS)
+    if have_sd:
+        fids += list(SD_READERS)
+    seen = set()
+    for fid in fids:
+        if fid in seen:
+            continue
+        seen.add(fid)
         if fid not in by_id or fid in _SITE_LEVEL:   # site-level fields written above
             continue
         a = _aggregate(fid, atype.get(fid), per)

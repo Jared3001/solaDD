@@ -28,7 +28,8 @@ from openpyxl import load_workbook
 from runner import run_reader, apply_outcome
 from geocoder import geocode
 import fema, hud, tcac, oz, calfire, calgem, cgs, ust, zimas, jurisdiction, parcel, nc, pha
-import places, slope, towers, airport, coastal
+import places, slope, towers, airport, coastal, sandiego
+from jurisdiction import _county_basename
 
 # field id -> reader callable(geo) -> {"answer","notes"} (or raises -> TOOL-FAIL)
 # Statewide / federal / derived sources — run for any CA parcel.
@@ -81,6 +82,22 @@ ZIMAS_READERS = {
     "tier_transit_verification": zimas.tier_transit_verification,
 }
 
+# City-of-San-Diego municipal block (SD analog of ZIMAS) — only run when the
+# parcel is in San Diego County; off the City of SD these readers raise and the
+# fields route to local planning. (airport_hazard_zone is NOT here — it stays in
+# the always-run READERS, with an SD branch inside airport.py.)
+# q_conditions_la / methane_hazard_zone_la / transitional_height_adj_zones are
+# LA-only concepts -> N/A in SD (no readers).
+SD_READERS = {
+    "zoning": sandiego.zoning,
+    "specific_plan_overlay": sandiego.specific_plan_overlay,
+    "council_supervisor_district": sandiego.council_district,
+    "historic_status": sandiego.historic_status,
+    "toc_tier_la": sandiego.transit_priority_area,   # SD Transit Priority Area in the TOC/Tier cell
+    "half_mile_major_transit": sandiego.half_mile_major_transit,
+    "tier_transit_verification": sandiego.tier_transit_verification,
+}
+
 
 def collect(wb_path, address, property_id=None, workers=10):
     schema = yaml.safe_load((ROOT / "canonical/schema.yaml").read_text())
@@ -92,12 +109,16 @@ def collect(wb_path, address, property_id=None, workers=10):
     if zimas.in_la_city(geo):       # also warms the parcel snap the ZIMAS readers share
         active.update(ZIMAS_READERS)
         print("parcel is in LA City -> running ZIMAS block\n")
+    elif _county_basename(geo) == "San Diego":
+        active.update(SD_READERS)
+        print("parcel is in San Diego -> running SD block\n")
     else:
-        print("parcel not in LA City -> ZIMAS block skipped (route to local planning)\n")
-    try:
-        nc._load()                  # warm the Neighborhood Change cache once (shared by threads)
-    except Exception:
-        pass
+        print("parcel not in LA City / San Diego -> municipal block skipped (route to local planning)\n")
+    for _warm in (nc._load, tcac._load_index):   # warm the shared bulk caches once (thread-safe)
+        try:
+            _warm()
+        except Exception:
+            pass
 
     # Phase 1 — fetch every reader concurrently (I/O-bound; off the workbook).
     def _fetch(item):

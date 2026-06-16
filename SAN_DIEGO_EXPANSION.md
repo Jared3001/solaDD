@@ -1,23 +1,38 @@
 # San Diego County Expansion — Source Analysis & Plan
 
-**Status:** analysis complete; **parcel keystone built + live-validated** (step 1). 2026-06-16.
+**Status:** San Diego County **at automation parity with LA** — a SD address now auto-fills
+the same ~37 fields (only the 3 LA-only concepts are N/A). 2026-06-16.
 
-## Build progress
-- ✅ **Parcel keystone (`build/sources/sd_parcel.py`)** — `apn` + `land_sf` for San Diego
-  via SANDAG Hosted/Parcels, address-aware snap (mirrors `parcel._county_snap`), area
-  from polygon geometry in EPSG:2230. Routed in via `parcel.land_sf` and
-  `jurisdiction.apn` (county branch; LA paths untouched, regression-tested). `_arcgis.query`
-  gained `return_centroid` for cheap nearest-parcel snapping. Live-tested on real SD
-  addresses (e.g. 525 B St → APN 533-523-14-00, 24,656 sf, VERIFIED); full `collect.py`
-  SD run green. `pha` confirmed resolving to **San Diego Housing Commission** (the naming
-  risk in the analysis — handled). `parcel_info()` ready for assemblage wiring (next).
-- 🔎 **Finding — `resource_area` does NOT port for free.** The TCAC endpoint in `tcac.py`
-  (`RmCCgQtiZLDCtblq/…2026_TCAC_HCD_Opportunity_Area_Maps`) is **LA County's republished
-  copy** — it contains only 06037 tracts (0 for San Diego). Needs the **statewide** 2026
-  CTCAC/HCD Opportunity Map (a 2025 statewide copy exists at `services6.arcgis.com/
-  PArfeTGcwA9RGNzN/…CTCAC_HCD_Opportunity_Area_Map_2025`; locate the 2026 statewide layer
-  with the same `oppcat`/`fips` fields). This also improves LA robustness. Moved below
-  from "works as-is".
+## Build progress — ALL STEPS DONE (2026-06-16)
+- ✅ **Step 1 — Parcel keystone (`build/sources/sd_parcel.py`)** — `apn` + `land_sf` via
+  SANDAG Hosted/Parcels, address-aware snap (mirrors `parcel._county_snap`), area from
+  polygon geometry in EPSG:2230. Routed via `parcel.land_sf` + `jurisdiction.apn`.
+  `_arcgis.query` gained `return_centroid`. `parcel_info()` powers assemblage. `pha`
+  confirmed = **San Diego Housing Commission**.
+- ✅ **Step 2 — `resource_area` made statewide (`tcac.py`)** — the old endpoint was LA
+  County's republished copy (06037-only). Now reads the **statewide 2026 CTCAC/HCD
+  Opportunity Map** — the official UC Berkeley OBI GeoJSON (`belonging.berkeley.edu/…/
+  final_2026.geojson`, 11,337 tracts, all 58 counties), the SAME file `nc.py` uses;
+  disk-cached to `_cache/tcac_2026.json` like nc, pre-warmed in collect. Works for both
+  SD ("Low Resource, San Diego Region") and LA. *(Caveat: every public ArcGIS copy of the
+  TCAC map is single-county; the OBI GeoJSON is the only statewide source. Bump SRC/YEAR
+  from the OBI tool's `unpacked/<id>` each annual release.)*
+- ✅ **Step 3 — SD municipal block (`build/sources/sandiego.py`) + assemblage** — the SD
+  analog of the ZIMAS block, wired into `collect.py` as `SD_READERS` (gated by
+  county==San Diego). Readers (City of San Diego scope; off-city → manual):
+  `zoning` (Base Zones `ZONE_NAME`), `specific_plan_overlay` (DSD Zoning_Overlay),
+  `council_supervisor_district` (DoIT_Public), `historic_status` (Historic_Preservation_
+  Resources), `toc_tier_la`←Transit Priority Area, `half_mile_major_transit` (TPA = SB743
+  ½-mi-of-major-transit), `tier_transit_verification`; `airport_hazard_zone` got an SD
+  branch inside `airport.py` (City DSD/Airports AIA). `assemblage.py` now auto-detects
+  LA vs SD per-APN and aggregates `{**READERS, **SD_READERS}` for SD blocks.
+  - **QA caveats:** `half_mile_major_transit` is derived from the TPA polygon because the
+    SANDAG Major Transit Stops FeatureServer was dead (statutorily a TPA *is* within ½ mi
+    of a major transit stop). `historic_status` flags pre-1979 structures for manual HRB
+    eligibility. SD readers cover the **City of San Diego**; unincorporated/other-cities
+    route to manual.
+- ⛔ **N/A in SD (no reader):** `q_conditions_la`, `methane_hazard_zone_la`,
+  `transitional_height_adj_zones` (LA-only zoning concepts).
 
 ---
 
