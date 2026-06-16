@@ -26,6 +26,35 @@ OVERPASS_ENDPOINTS = ["https://overpass-api.de/api/interpreter",
 HEADERS = {"User-Agent": "solaDD/1.0 (DD automation)", "Accept": "application/json",
            "Content-Type": "application/x-www-form-urlencoded"}
 
+# Tighter classifiers for two loosely-tagged OSM categories.
+_NON_K12 = ("preschool", "pre-school", "pre school", "childcare", "child care", "daycare",
+            "day care", "montessori", "college", "university", "kindergarten", "head start",
+            "children's", "childrens", "learning center", "learning centre", "academy of")
+
+
+def _is_k12(t):
+    """amenity=school, excluding preschools / childcare / colleges (OSM over-tags 'school')."""
+    if t.get("amenity") != "school":
+        return False
+    if t.get("school") in ("childcare", "preschool", "kindergarten"):
+        return False
+    name = (t.get("name") or "").lower()
+    return not any(w in name for w in _NON_K12)
+
+
+def _is_medical(t):
+    """A general medical clinic/hospital — exclude occupational-health and veterinary."""
+    med = (t.get("amenity") in ("clinic", "doctors", "hospital")
+           or t.get("healthcare") in ("clinic", "hospital", "centre", "doctor"))
+    if not med:
+        return False
+    spec = str(t.get("healthcare:speciality", "")).lower()
+    name = (t.get("name") or "").lower()
+    if "occupational" in spec or "occupational" in name or "veterinar" in name:
+        return False
+    return True
+
+
 # (field id, label, radius_m, overpass selectors, tag predicate)
 _CATS = [
     ("nearest_bus_stop", "bus stop", 1600,
@@ -37,15 +66,15 @@ _CATS = [
      lambda t: t.get("shop") in ("supermarket", "grocery")),
     ("nearest_park", "park", 4800, ["nwr[leisure=park]"],
      lambda t: t.get("leisure") == "park"),
-    ("nearest_medical_clinic", "medical clinic", 4800,
-     ["nwr[amenity=clinic]", "nwr[amenity=doctors]", "nwr[healthcare=clinic]"],
-     lambda t: t.get("amenity") in ("clinic", "doctors") or t.get("healthcare") == "clinic"),
+    ("nearest_medical_clinic", "medical clinic/hospital", 4800,
+     ["nwr[amenity=clinic]", "nwr[amenity=doctors]", "nwr[amenity=hospital]",
+      "nwr[healthcare=clinic]", "nwr[healthcare=hospital]", "nwr[healthcare=centre]"],
+     _is_medical),
     ("nearest_library", "library", 4800, ["nwr[amenity=library]"],
      lambda t: t.get("amenity") == "library"),
     ("nearest_pharmacy", "pharmacy", 4800, ["nwr[amenity=pharmacy]"],
      lambda t: t.get("amenity") == "pharmacy"),
-    ("nearest_school", "school", 4800, ["nwr[amenity=school]"],
-     lambda t: t.get("amenity") == "school"),
+    ("nearest_school", "K-12 school", 4800, ["nwr[amenity=school]"], _is_k12),
     ("nearest_qualifying_transit_stop", "rail / major transit station", 6400,
      ["nwr[railway=station]", "nwr[railway=halt]", "nwr[station=subway]",
       "nwr[station=light_rail]", "node[public_transport=station][train=yes]"],

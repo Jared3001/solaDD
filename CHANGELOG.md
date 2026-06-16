@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.9.1-draft (2026-06-15)
+- places.py: tightened two loosely-tagged OSM categories. nearest_school now
+  means K-12 (excludes preschool/childcare/college by school subtag + name);
+  nearest_medical_clinic now targets real medical clinics/hospitals and excludes
+  occupational-health and veterinary. Pico: school -> Queen Anne Elementary
+  (0.33 mi, was "California Childrens College"); clinic -> Jung Medical Center
+  (0.75 mi, was an occupational-health center).
+- Verified Neighborhood Change for tract 06037212800 against the authoritative
+  AFFH dataset: nbrhood_chng=1 (pathway1a+pathway2, baseline race+income met,
+  not excluded) -> Yes. (Confirms the automated answer; the manual sheet's No
+  was the error.)
+
 ## v0.9-draft (2026-06-15)
 - Parallelized the pipeline (readers are I/O-bound -> threads release the GIL).
   Single-parcel collect ~60-90s -> ~10s; 3-parcel assemblage minutes -> ~18s.
