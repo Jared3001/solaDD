@@ -64,6 +64,46 @@ existing units, if desk-filled).
 
 ---
 
+## Part A2 — Every value the tool would change: automate or hand-enter? (mark each)
+
+These are all the model inputs the exporter would set. For each, tell me whether you want it
+**automated** or **left for the analyst**. **Mark the last column.**
+Legend: **Auto** = pulled from the DD checklist · **Logic** = projected from your Part-B rules ·
+**Hand** = analyst enters · **Default** = leave the template's value untouched.
+
+| Value | Cell | Proposed source | My rec | Auto / Logic / Hand / Default? |
+|---|---|---|---|---|
+| Project name | `B2` | DD address | Auto | ☐ |
+| County | `C3` | DD county | Auto | ☐ |
+| PHA | `C4` | DD pha | Auto | ☐ |
+| QCT/DDA | `C5` | DD qct/dda | Auto | ☐ |
+| Resource Area | `C6` | DD resource_area | Auto | ☐ |
+| Neighborhood Change | `C7` | DD neighborhood_change | Auto | ☐ |
+| CRA | `C8` | DD? (derivable?) or manual | Confirm | ☐ |
+| Lot SF | `C12` | DD land_sf | Auto | ☐ |
+| Construction Type (I/III) | `C9` | logic (stories + hazards) | Logic | ☐ |
+| Residential stories / FAR | Sheet1 `E10`/`E11` (or PF) | logic (zoning + height district + TOC) | Logic | ☐ |
+| Bedroom mix (counts + %) | `H3:H6` / `I3:I6` | logic (product type) | Logic | ☐ |
+| Avg unit sizes (NRSF/bdrm) | rent roll `H10/H14/H18/H22` | assumption | Logic/Default | ☐ |
+| Manager's unit(s) | `I26` | logic (ratio to units) | Logic | ☐ |
+| AMI band mix (30/50/60/70) | `J` column | logic (program) | Logic | ☐ |
+| Build method (Stick/Modular) | `A36` | always both (two files) | Auto (both) | ☐ |
+| 4% vs 9% path | (financing) | logic | Logic | ☐ |
+| Financing layers | `D59` | logic / manual | Confirm | ☐ |
+| Acquisition price | `C33` / `S16` | OM / broker | Hand | ☐ |
+| Prevailing Wage | `C10` | manual? | Hand/Confirm | ☐ |
+| BIPOC | `C11` | manual | Hand | ☐ |
+| Rent growth | Sheet1 `F14` (2.5%) | template | Default | ☐ |
+| Expense growth | Sheet1 `F15` (3.5%) | template | Default | ☐ |
+| Bond-test limit | `C21` (27.5%) | template | Default/Confirm | ☐ |
+| Applicable % / credit factor | `D88` / `D89` | template | Default/Confirm | ☐ |
+
+*(Market rents are auto-looked-up by County from the `Market Inputs` tab — not set directly.)*
+Anything you mark **Hand** the exporter will leave blank/untouched for the analyst; anything
+**Logic** depends on the Part-B rules being confirmed first.
+
+---
+
 ## Part B — Draft projection logic (decision tables) — RED-LINE THESE
 
 > All values **[CONFIRM]**. Inputs in **bold** are ones we already have from the DD checklist.
