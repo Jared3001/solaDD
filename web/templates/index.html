@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SoLa DD — Site Feasibility</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Source+Serif+4:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">SoLa Impact</span>
+      <span class="brand-sep">/</span>
+      <span class="brand-title">Site DD Feasibility</span>
+    </div>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </header>
+
+  <main class="wrap">
+    <section class="panel">
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-mode="single" role="tab">Single address</button>
+        <button class="tab" data-mode="assemblage" role="tab">Block assemblage (APNs)</button>
+      </div>
+
+      <form id="run-form">
+        <div class="field" data-for="single">
+          <label for="address">Property address</label>
+          <input type="text" id="address" name="address"
+                 placeholder="11300 S Main St, Los Angeles, CA 90061" autocomplete="off">
+          <p class="hint">Any California address. Runs ~40 automated readers (~10s). LA-City parcels also get the ZIMAS zoning/hazard block.</p>
+        </div>
+
+        <div class="field hidden" data-for="assemblage">
+          <label for="apns">APN list</label>
+          <textarea id="apns" name="apns" rows="4"
+                    placeholder="5082-024-018&#10;5082-024-019&#10;5082-024-020"></textarea>
+          <p class="hint">One APN per line (or comma-separated). LA City parcels only. Sums combined land area and aggregates every designation across the block (~18s).</p>
+        </div>
+
+        <button type="submit" id="run-btn" class="run-btn">Run feasibility</button>
+        <p id="form-error" class="error-banner hidden"></p>
+      </form>
+    </section>
+
+    <section id="status-panel" class="panel hidden">
+      <div class="status-head">
+        <div>
+          <p class="phase" id="phase">Starting…</p>
+          <p class="matched" id="matched"></p>
+        </div>
+        <a id="download" class="download-btn hidden" href="#">Download .xlsx</a>
+      </div>
+      <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
+      <p class="counts" id="counts"></p>
+      <div id="parcels" class="parcels hidden"></div>
+    </section>
+
+    <section id="results" class="results"></section>
+  </main>
+
+  <script>window.SECTIONS = {{ sections | tojson }};</script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

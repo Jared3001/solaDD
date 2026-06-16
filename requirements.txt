@@ -1,0 +1,15 @@
+# Web front end + the DD pipeline's own deps (pinned to the working venv).
+Flask>=3.0,<4
+gunicorn>=21.2
+
+# pipeline deps (mirror build/sources requirements)
+openpyxl==3.1.5
+PyYAML==6.0.3
+requests==2.34.2
+
+# transitive — pinned for reproducible Railway builds
+certifi==2026.5.20
+charset-normalizer==3.4.7
+idna==3.18
+urllib3==2.7.0
+et_xmlfile==2.0.0

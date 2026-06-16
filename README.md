@@ -16,6 +16,8 @@ build/sources/  geocoder.py (keystone) + Tier-A readers: fema · hud · tcac · 
              nc (neighborhood change) · pha (housing authority) · places (nearest_* via OSM) ·
              slope (USGS 3DEP) · towers (cell) · airport (ALUC) · coastal (CCC) · streetview (key-ready aid)
              (each → {answer,notes}; _arcgis.py shared query helper)
+web/         Flask front end over collect.py/assemblage.py (shared-password, live
+             progress, .xlsx download). Deploys to Railway — see web/DEPLOY.md.
 template/    Checklist_BLANK_master.xlsx  ← the blank; copied per property, never edited
 logs/        scrub_inventory.csv (one-time master cleanup record)
 ```

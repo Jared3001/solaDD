@@ -1,0 +1,10 @@
+# Railway build (nixpacks). Pin Python and the start command explicitly so the
+# build does not depend on autodetection.
+[phases.setup]
+nixPkgs = ["python312", "gcc"]
+
+[phases.install]
+cmds = ["python -m venv /opt/venv", ". /opt/venv/bin/activate && pip install --upgrade pip && pip install -r requirements.txt"]
+
+[start]
+cmd = "gunicorn web.app:app --workers 1 --threads 8 --timeout 300 --bind 0.0.0.0:$PORT"
