@@ -32,6 +32,10 @@ import uw_logic
 
 DD_SHEET = "Site DD"
 METHODS = ("Stick", "Modular")
+# clean master pro-forma shipped in the repo (deal-specific hard inputs wiped:
+# stories C15, acquisition S16, plus the exporter-overwritten id cells). Used when
+# --template / $SOLA_UW_TEMPLATE aren't given.
+DEFAULT_TEMPLATE = ROOT / "template" / "ProForma_BLANK_master.xlsm"
 
 
 def _dd_cell_map():
@@ -140,8 +144,9 @@ def selftest(example_xlsm):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("dd", nargs="?", help="DD checklist workbook (.xlsx) OR, with --selftest, the example .xlsm")
-    ap.add_argument("--template", default=os.environ.get("SOLA_UW_TEMPLATE"),
-                    help="master pro-forma .xlsm (defaults to $SOLA_UW_TEMPLATE)")
+    ap.add_argument("--template",
+                    default=os.environ.get("SOLA_UW_TEMPLATE") or (str(DEFAULT_TEMPLATE) if DEFAULT_TEMPLATE.exists() else None),
+                    help="master pro-forma .xlsm (default: $SOLA_UW_TEMPLATE, else template/ProForma_BLANK_master.xlsm)")
     ap.add_argument("--out", default=str(ROOT / "build" / "_underwriting"))
     ap.add_argument("--name", help="deal name (default: street address from DD)")
     ap.add_argument("--selftest", action="store_true", help="round-trip the example .xlsm and verify cells")

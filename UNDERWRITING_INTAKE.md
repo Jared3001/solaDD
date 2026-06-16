@@ -188,8 +188,14 @@ Bedroom mix writes `I3/I5/I6` (`I4` 1B is the template's `=1-I3-I5-I6` remainder
 the template's remainder). Modular overrides sizes `L5`=804 / `L6`=994. openpyxl `keep_vba` round-trip
 verified safe (macros + 12 LAMBDA names + existing formulas preserved).
 
-**Usage:** `python build/underwrite.py <DD_checklist.xlsx> --template <master.xlsm> [--out DIR] [--name "Deal"]`
+**Usage:** `python build/underwrite.py <DD_checklist.xlsx> [--template <master.xlsm>] [--out DIR] [--name "Deal"]`
 → writes `<deal> — Stick.xlsm` and `<deal> — Modular.xlsm`. `--selftest <example.xlsm>` round-trips
-and asserts every written cell. **Point `--template` at a clean master pro-forma** (not a filled
-deal) so the untouched Hand fields — stories `C15`, acquisition price, BIPOC, prevailing wage — start
-blank. Self-test PASS on Kinzie (Large Family) + demo (Standard/1B) branches.
+and asserts every written cell. Self-test PASS on Kinzie (Large Family) + demo (Standard/1B) branches.
+
+**Clean master template:** `template/ProForma_BLANK_master.xlsm` (used by default when
+`--template`/`$SOLA_UW_TEMPLATE` are omitted). Derived from the Kinzie model with the deal-specific
+**hard inputs wiped** so nothing leaks: acquisition price `S16` (was $5M) and residential stories
+`C15` (Hand fields the exporter doesn't set), plus the exporter-overwritten id cells (`B2`/`C3`/`C12`).
+Dropdown cells (`C4`–`C9`, `A36`, `C10` PW, `C11` BIPOC) are left as-is — the exporter overwrites the
+ones it owns, and the rest (`C10`/`C11` = "No") are neutral defaults. Template *defaults* are kept:
+rent/expense growth, bond test, podium levels, unit sizes `L3:L6`, DD soft cost. Macros/LAMBDAs intact.
