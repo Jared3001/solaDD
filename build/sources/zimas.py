@@ -108,6 +108,12 @@ def _snapped(geo):
 
 
 def in_la_city(geo) -> bool:
+    # Trust the Census incorporated place first: if the parcel is in some OTHER
+    # incorporated city, it is not LA City — even if a snap could grab an LA City
+    # parcel across a shared border (e.g. La Cienega on the Culver City line).
+    place = (geo.get("place") or "").strip().lower()
+    if place and place != "los angeles":
+        return False
     try:
         _snapped(geo)
         return True

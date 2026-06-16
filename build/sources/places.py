@@ -22,7 +22,10 @@ import urllib.request
 import _arcgis as ag   # for haversine_m
 
 OVERPASS_ENDPOINTS = ["https://overpass-api.de/api/interpreter",
-                      "https://overpass.kumi.systems/api/interpreter"]
+                      "https://overpass.kumi.systems/api/interpreter",
+                      "https://overpass.openstreetmap.fr/api/interpreter",
+                      "https://overpass.private.coffee/api/interpreter"]
+PER_ENDPOINT_TIMEOUT = 35   # fail over to the next mirror fast instead of grinding on a slow one
 HEADERS = {"User-Agent": "solaDD/1.0 (DD automation)", "Accept": "application/json",
            "Content-Type": "application/x-www-form-urlencoded"}
 
@@ -101,7 +104,7 @@ def _fetch_combined(lat, lon):
     for endpoint in OVERPASS_ENDPOINTS:
         try:
             req = urllib.request.Request(endpoint, data=data, headers=HEADERS)
-            with urllib.request.urlopen(req, timeout=90) as r:
+            with urllib.request.urlopen(req, timeout=PER_ENDPOINT_TIMEOUT) as r:
                 return json.load(r).get("elements", [])
         except Exception as e:
             last = e

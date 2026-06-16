@@ -1,53 +1,73 @@
 #!/usr/bin/env python3
 """
-ust.py — underground_storage_tanks reader (EPA UST Finder, Tier-A).
+ust.py — underground_storage_tanks reader (Tier-A proximity).
 
-Source: EPA UST Finder ArcGIS Online, confirmed live 2026-06-15:
-  services.arcgis.com/cJ9YHowT8TU7DUyn/.../UST_Finder_Feature_Layer_2/FeatureServer
-  Layer 0 = regulated UST facilities, Layer 1 = LUST (leaking) cleanup sites.
-  Point features (native WGS84).
-Answer "Yes" if a UST facility is on/adjacent (<= FAC_M) OR an open LUST cleanup
-site is within LUST_M. Nearest facility + nearest LUST reported for judgment.
+Primary (CA): the State Water Board's GeoTracker hosted layer — the authoritative,
+richer CA source for LUST / cleanup sites (open AND closed). Flag "Yes" if any
+UST/LUST site is within ~305 m (≈1,000 ft, the manual DD radius); report the
+open/closed split and the nearest site, since for environmental DD even a CLOSED
+nearby case warrants Phase I awareness.
 
-EPA UST Finder is a periodic national snapshot; for CA legal DD confirm the
-nearest hit against the live State Water Board GeoTracker record.
+Fallback (non-CA, or GeoTracker error): EPA UST Finder (a thinner national snapshot).
 """
 import _arcgis as ag
 
-SVC = ("https://services.arcgis.com/cJ9YHowT8TU7DUyn/arcgis/rest/services/"
+GT = ("https://gispublic.waterboards.ca.gov/portalserver/rest/services/"
+      "Hosted/geotracker_sites_download/FeatureServer")
+GT_LAYER = 371
+EPA = ("https://services.arcgis.com/cJ9YHowT8TU7DUyn/arcgis/rest/services/"
        "UST_Finder_Feature_Layer_2/FeatureServer")
-FAC_M, LUST_M = 150, 300
+RADIUS_M = 305   # ~1,000 ft
+
+
+def _is_open(status):
+    return str(status or "").strip().lower().startswith("open")
+
+
+def _geotracker(geo) -> dict:
+    lon, lat = geo["lon"], geo["lat"]
+    feats = ag.query(GT, GT_LAYER, lon=lon, lat=lat, distance=RADIUS_M, return_geometry=True, out_sr=4326,
+                     out_fields="business_n,case_type,status,potential_")
+    if not feats:
+        return {"answer": "No", "notes": f"No GeoTracker UST/LUST cleanup sites within {RADIUS_M} m (~1,000 ft). Source: SWRCB GeoTracker."}
+    openn = sum(1 for f in feats if _is_open(f["attributes"].get("status")))
+    closed = len(feats) - openn
+    near, nd = ag.nearest(feats, lon, lat)
+    a = near["attributes"]
+    nearest = f"{a.get('business_n')} [{a.get('status')}, {a.get('potential_')}], {nd:.0f} m"
+    return {"answer": "Yes",
+            "notes": f"{len(feats)} UST/LUST cleanup site(s) within {RADIUS_M} m (~1,000 ft): {openn} open, {closed} closed. "
+                     f"Nearest: {nearest}. Phase I review recommended. Source: SWRCB GeoTracker."}
+
+
+def _epa(geo) -> dict:
+    lon, lat = geo["lon"], geo["lat"]
+    facs = ag.query(EPA, 0, lon=lon, lat=lat, distance=RADIUS_M, return_geometry=True, out_fields="Name,Open_USTs")
+    lusts = ag.query(EPA, 1, lon=lon, lat=lat, distance=RADIUS_M, return_geometry=True, out_fields="Name,Status,Substance")
+    fac, fd = ag.nearest(facs, lon, lat)
+    lust, ld = ag.nearest(lusts, lon, lat)
+    if fac is None and lust is None:
+        return {"answer": "No", "notes": f"No UST facilities or LUST sites within {RADIUS_M} m. Source: EPA UST Finder."}
+    parts = []
+    if fac is not None:
+        parts.append(f"UST facility '{fac['attributes'].get('Name')}' {fd:.0f} m")
+    if lust is not None:
+        la = lust["attributes"]
+        parts.append(f"LUST '{la.get('Name')}' [{la.get('Status')}] {ld:.0f} m")
+    return {"answer": "Yes", "notes": "; ".join(parts) + ". Source: EPA UST Finder (non-CA fallback)."}
 
 
 def underground_storage_tanks(geo) -> dict:
-    lon, lat = geo["lon"], geo["lat"]
-    facs = ag.query(SVC, 0, lon=lon, lat=lat, distance=LUST_M, return_geometry=True,
-                    out_fields="Name,Address,Open_USTs,Closed_USTs,Facility_Status")
-    lusts = ag.query(SVC, 1, lon=lon, lat=lat, distance=LUST_M, return_geometry=True,
-                     out_fields="Name,Address,Status,Substance")
-    fac_feat, fac_d = ag.nearest(facs, lon, lat)
-    lust_feat, lust_d = ag.nearest(lusts, lon, lat)
-    parts, yes = [], False
-    if fac_feat is not None:
-        fa = fac_feat["attributes"]
-        if fac_d <= FAC_M:
-            yes = True
-        parts.append(f"nearest UST facility '{fa.get('Name')}' ({fa.get('Open_USTs')} open tanks), {fac_d:.0f} m")
-    if lust_feat is not None:
-        la = lust_feat["attributes"]
-        open_near = str(la.get("Status") or "").startswith("Open") and lust_d <= LUST_M
-        if open_near:
-            yes = True
-        meta = ", ".join(str(la[k]) for k in ("Status", "Substance") if la.get(k))
-        parts.append(f"nearest LUST '{la.get('Name')}' [{meta}], {lust_d:.0f} m")
-    if not parts:
-        return {"answer": "No", "notes": f"No UST facilities or LUST sites within {LUST_M} m. Source: EPA UST Finder."}
-    return {"answer": "Yes" if yes else "No",
-            "notes": "; ".join(parts) + ". Source: EPA UST Finder (confirm CA hits via GeoTracker)."}
+    if geo.get("state_fips") == "06":
+        try:
+            return _geotracker(geo)
+        except Exception:
+            pass   # GeoTracker down -> EPA fallback
+    return _epa(geo)
 
 
 if __name__ == "__main__":
     import sys, json
     from geocoder import geocode
-    g = geocode(" ".join(sys.argv[1:]) or "11300 S Main St, Los Angeles, CA 90061")
+    g = geocode(" ".join(sys.argv[1:]) or "18811 Colima Rd, Rowland Heights, CA")
     print(json.dumps(underground_storage_tanks(g), indent=2))

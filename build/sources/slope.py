@@ -17,8 +17,9 @@ import urllib.parse
 import urllib.request
 
 EPQS = "https://epqs.nationalmap.gov/v1/json"
-SAMPLE_M = 40.0
+SAMPLE_M = 45.0
 THRESHOLD_PCT = 10.0
+BEARINGS = list(range(0, 360, 45))   # N, NE, E, SE, S, SW, W, NW — 8 points for better spatial coverage
 UA = "Mozilla/5.0 (solaDD slope)"
 
 
@@ -41,18 +42,19 @@ def _elev_ft(lat, lon, tries=3):
 def slope_grade(geo) -> dict:
     lat, lon = geo["lat"], geo["lon"]
     center = _elev_ft(lat, lon)
-    dlat = SAMPLE_M / 111320.0
-    dlon = SAMPLE_M / (111320.0 * math.cos(math.radians(lat)))
     run_ft = SAMPLE_M * 3.28084
-    grades = {}
-    for name, (la, lo) in {"N": (lat + dlat, lon), "S": (lat - dlat, lon),
-                           "E": (lat, lon + dlon), "W": (lat, lon - dlon)}.items():
-        grades[name] = abs(_elev_ft(la, lo) - center) / run_ft * 100.0
-    face = max(grades, key=grades.get)
-    mx = grades[face]
-    return {"answer": "Yes" if mx >= THRESHOLD_PCT else "No",
-            "notes": f"Max grade ~{mx:.1f}% ({face} face, {SAMPLE_M:.0f} m sample; >= {THRESHOLD_PCT:.0f}% = Yes). "
-                     f"DERIVED from USGS 3DEP 1 m DEM — confirm on site. Source: USGS EPQS."}
+    mx, face = 0.0, "flat"
+    for b in BEARINGS:
+        th = math.radians(b)
+        dN, dE = SAMPLE_M * math.cos(th), SAMPLE_M * math.sin(th)
+        la = lat + dN / 111320.0
+        lo = lon + dE / (111320.0 * math.cos(math.radians(lat)))
+        g = abs(_elev_ft(la, lo) - center) / run_ft * 100.0
+        if g > mx:
+            mx, face = g, b
+    return {"answer": "Yes" if mx >= THRESHOLD_PCT else "No", "state": "JUDGMENT",
+            "notes": f"Max grade ~{mx:.1f}% (bearing {face}°, {SAMPLE_M:.0f} m, 8-point sample; >= {THRESHOLD_PCT:.0f}% = Yes). "
+                     f"DERIVED screen from USGS 3DEP 1 m DEM — confirm on site (a parcel pad can read flat). Source: USGS EPQS."}
 
 
 if __name__ == "__main__":

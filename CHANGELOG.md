@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.10-draft (2026-06-15)
+Scale-test fixes (the 9-site batch surfaced these):
+- geocoder: OSM/Nominatim fallback when the Census geocoder can't match an
+  address (resolves the tract via the Census coordinates endpoint), keeping the
+  input address for downstream parcel matching. 3801 La Cienega — previously a
+  hard failure — now fully resolves (APN matches the manual). 9/9 sites automatable.
+- zimas.in_la_city now gated on the Census incorporated place — fixes a border
+  misroute where a Culver City parcel on the La Cienega line snapped to an LA City
+  parcel and ran the ZIMAS block. City-border jurisdiction routing is now correct.
+- ust: GeoTracker (SWRCB) is the primary CA source — counts open+closed UST/LUST
+  cleanup sites within ~305 m (≈1,000 ft) and flags Yes for any (Phase I), with EPA
+  UST Finder as the non-CA fallback. Catches sites EPA's snapshot missed
+  (e.g. Rowland Heights: 2 closed LUST within 1,000 ft).
+- slope_grade: 8-point sample (was 4) and now lands JUDGMENT ("confirm on site")
+  rather than VERIFIED — it is a DEM screen, not a verdict.
+- places: 4 Overpass mirrors + 35 s per-endpoint timeout for fast failover (fixes
+  the 134 s outlier seen in the batch).
+
 ## v0.9.1-draft (2026-06-15)
 - places.py: tightened two loosely-tagged OSM categories. nearest_school now
   means K-12 (excludes preschool/childcare/college by school subtag + name);

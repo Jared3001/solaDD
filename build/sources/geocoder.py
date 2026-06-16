@@ -16,7 +16,23 @@ import json, urllib.parse, urllib.request
 
 BASE = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress"
 COORD = "https://geocoding.geo.census.gov/geocoder/geographies/coordinates"
+NOMINATIM = "https://nominatim.openstreetmap.org/search"
 BENCHMARK, VINTAGE = "Public_AR_Current", "Current_Current"
+
+
+def _nominatim(address, timeout=30):
+    """OSM fallback geocoder for addresses the Census geocoder can't match.
+    Returns (lon, lat, display_name) or None."""
+    q = urllib.parse.urlencode({"q": address, "format": "json", "limit": 1, "countrycodes": "us"})
+    req = urllib.request.Request(f"{NOMINATIM}?{q}", headers={"User-Agent": "solaDD/1.0 (DD automation)"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            d = json.load(r)
+    except Exception:
+        return None
+    if not d:
+        return None
+    return float(d[0]["lon"]), float(d[0]["lat"]), d[0].get("display_name")
 
 
 def _get_json(url, timeout=30, tries=3):
@@ -56,6 +72,14 @@ def geocode(address: str, timeout: int = 30) -> dict:
     data = _get_json(f"{BASE}?{q}", timeout)
     matches = data.get("result", {}).get("addressMatches", [])
     if not matches:
+        # Census couldn't match — fall back to OSM for lon/lat, then resolve the
+        # census tract from those coordinates (tract is what HUD/OZ/TCAC/NC need).
+        nm = _nominatim(address, timeout)
+        if nm:
+            lon, lat, _disp = nm
+            geo = geocode_point(lon, lat, timeout)
+            geo["matched_address"] = address   # keep the input (has the house number) for parcel matching
+            return geo
         raise LookupError(f"no geocoder match for {address!r}")
     m = matches[0]
     c = m["coordinates"]                                   # x=lon, y=lat
