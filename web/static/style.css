@@ -159,6 +159,16 @@ h1, .brand-mark, .tab, .run-btn, label, th, .phase, .kicker {
   font-weight: 700; font-size: 14px; white-space: nowrap;
 }
 .download-btn:hover { background: #cf9128; }
+.download-btn { border: 0; cursor: pointer; line-height: 1; }
+.status-actions { display: flex; gap: 8px; align-items: center; }
+.download-btn.ghost { background: transparent; color: var(--navy); border: 1px solid var(--line); }
+.download-btn.ghost:hover { background: #f3ede1; }
+.uw-models { margin: 6px 0 12px; padding-left: 18px; font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--navy); }
+.uw-models li { margin: 2px 0; }
+.uw-flags { margin: 8px 0; }
+.uw-flags p { margin: 2px 0; color: #9a6a00; font-size: 13px; }
+#uw-body table { width: 100%; border-collapse: collapse; font-size: 13px; }
+#uw-body td { padding: 4px 8px; border-top: 1px solid var(--line); }
 
 .progress { height: 8px; background: #eee8dc; border-radius: 5px; margin: 16px 0 6px; overflow: hidden; }
 .progress-bar { height: 100%; width: 0; background: var(--mid); transition: width .35s ease; }

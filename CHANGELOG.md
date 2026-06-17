@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.16-draft (2026-06-17) — "Financial model" tab on the web app
+The underwriting exporter (`build/underwrite.py`, DD checklist → Stick + Modular
+pro-forma) is now wired into the web front end as a new **Financial model** tab.
+Two ways in, per the build decision:
+- **Upload** a completed DD checklist (.xlsx) on the new tab → both models, zipped.
+- **Chain**: a "Generate financial model" button appears on any finished DD run
+  (single or assemblage) and feeds that run's workbook straight in — no re-upload.
+
+Implementation: `run_underwrite(job)` in `web/jobs.py` (reads the DD, calls
+`underwrite.export` against the in-repo master template, zips the two .xlsm,
+surfaces product/flags/DD-inputs in `job["underwrite"]`); `mode="underwrite"` in
+`web/app.py` (multipart upload or JSON `from_job`); new tab + upload field + chain
+button + result panel in `index.html`/`app.js`/`style.css`. The DD-checklist
+time-saved counter does NOT increment for model runs. Verified end-to-end via the
+Flask test client: page renders, upload run → zipped download (application/zip),
+chain run → done, and the bad-`from_job`/empty-input error paths.
+
 ## v0.15-draft (2026-06-16) — multi-address assemblage in the DD engine
 `collect.py` can now run **several addresses as one site** — the address-based
 alternative to the APN-keyed web assemblage. Pass a `;`-separated address string

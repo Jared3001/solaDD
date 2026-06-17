@@ -6,6 +6,7 @@ const SECTION_ORDER = SECTIONS.map(s => s.id);
 
 let mode = "single";
 let pollTimer = null;
+let lastDDJob = null;       // most recent completed DD run, for "Generate financial model"
 
 const $ = sel => document.querySelector(sel);
 
@@ -23,6 +24,7 @@ document.querySelectorAll(".tab").forEach(tab => {
       document.querySelectorAll("[data-for]").forEach(f => {
         f.classList.toggle("hidden", f.dataset.for !== mode);
       });
+      $("#run-btn").textContent = mode === "underwrite" ? "Generate model" : "Run feasibility";
     }
   });
 });
@@ -32,26 +34,40 @@ $("#run-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   showError(null);
 
-  const omFile = mode === "single" ? ($("#om").files[0] || null) : null;
-  const address = mode === "single" ? $("#address").value.trim() : "";
-  if (mode === "single" && !address && !omFile) {
-    showError("Enter an address or upload an OM."); return;
-  }
-
   let fetchOpts;
-  if (omFile) {
+  if (mode === "underwrite") {
+    const ddFile = $("#dd").files[0] || null;
+    if (!ddFile) { showError("Upload a completed DD checklist (.xlsx)."); return; }
     const fd = new FormData();
-    fd.append("mode", "single");
-    fd.append("address", address);
-    fd.append("om", omFile);
-    fetchOpts = { method: "POST", body: fd };           // browser sets multipart boundary
+    fd.append("mode", "underwrite");
+    fd.append("dd", ddFile);
+    fd.append("name", $("#uw-name").value.trim());
+    fetchOpts = { method: "POST", body: fd };
   } else {
-    const body = { mode };
-    if (mode === "single") body.address = address;
-    else body.apns = $("#apns").value;
-    fetchOpts = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+    const omFile = mode === "single" ? ($("#om").files[0] || null) : null;
+    const address = mode === "single" ? $("#address").value.trim() : "";
+    if (mode === "single" && !address && !omFile) {
+      showError("Enter an address or upload an OM."); return;
+    }
+    if (omFile) {
+      const fd = new FormData();
+      fd.append("mode", "single");
+      fd.append("address", address);
+      fd.append("om", omFile);
+      fetchOpts = { method: "POST", body: fd };           // browser sets multipart boundary
+    } else {
+      const body = { mode };
+      if (mode === "single") body.address = address;
+      else body.apns = $("#apns").value;
+      fetchOpts = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+    }
   }
 
+  await launch(fetchOpts);
+});
+
+// POST a run request and start polling. Shared by the form + the chain button.
+async function launch(fetchOpts) {
   setRunning(true);
   resetStatus();
   try {
@@ -63,6 +79,13 @@ $("#run-form").addEventListener("submit", async (e) => {
     setRunning(false);
     showError(err.message);
   }
+}
+
+// "Generate financial model" from the just-completed DD run (no re-upload).
+$("#gen-model").addEventListener("click", () => {
+  if (!lastDDJob) return;
+  launch({ method: "POST", headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ mode: "underwrite", from_job: lastDDJob }) });
 });
 
 // ---------- polling ----------
@@ -107,12 +130,41 @@ function render(job) {
   if (job.downloadable) {
     const dl = $("#download");
     dl.href = `/api/download/${job.id}`;
+    dl.textContent = job.underwrite ? "Download models (.zip)" : "Download .xlsx";
     dl.classList.remove("hidden");
+  }
+
+  // Offer "Generate financial model" once a DD run (single/assemblage) is downloadable.
+  const isDD = job.kind === "single" || job.kind === "assemblage";
+  if (isDD && job.downloadable) {
+    lastDDJob = job.id;
+    $("#gen-model").classList.remove("hidden");
   }
 
   if (job.parcels) renderParcels(job);
   if (job.om) renderOM(job.om);
+  if (job.underwrite) renderUnderwrite(job.underwrite);
   renderFields(job.fields || []);
+}
+
+function renderUnderwrite(uw) {
+  const panel = $("#uw-panel");
+  panel.classList.remove("hidden");
+  $("#uw-sub").textContent = `${uw.deal} · product: ${uw.product || "—"}`
+    + (uw.resource ? ` · resource ${uw.resource}` : "");
+  const inRows = Object.entries(uw.inputs || {}).map(([k, v]) =>
+    `<tr><td class="col-field">${esc(k)}</td><td class="col-answer">${esc(v === null || v === "" ? "—" : v)}</td></tr>`
+  ).join("");
+  const flags = (uw.flags || []).length
+    ? `<div class="uw-flags">${uw.flags.map(f => `<p>⚑ ${esc(f)}</p>`).join("")}</div>` : "";
+  const models = (uw.models || []).map(m => `<li>${esc(m)}</li>`).join("");
+  $("#uw-body").innerHTML = `
+    <p class="combined">Two models generated — download is a .zip:</p>
+    <ul class="uw-models">${models}</ul>
+    ${flags}
+    <h3 class="section-head">DD inputs used</h3>
+    <table>${inRows}</table>
+    <p class="hint">Left blank for the analyst to fill, then recalc in Excel: ${esc((uw.hand_fields || []).join(", "))}.</p>`;
 }
 
 function renderOM(om) {
@@ -197,7 +249,7 @@ function badge(state) {
 function setRunning(on) {
   const btn = $("#run-btn");
   btn.disabled = on;
-  btn.textContent = on ? "Running…" : "Run feasibility";
+  btn.textContent = on ? "Running…" : (mode === "underwrite" ? "Generate model" : "Run feasibility");
 }
 function resetStatus() {
   $("#results").innerHTML = "";
@@ -205,6 +257,9 @@ function resetStatus() {
   $("#om-body").innerHTML = "";
   $("#parcels").classList.add("hidden");
   $("#parcels").innerHTML = "";
+  $("#uw-panel").classList.add("hidden");
+  $("#uw-body").innerHTML = "";
+  $("#gen-model").classList.add("hidden");
   $("#download").classList.add("hidden");
   $("#matched").textContent = "";
   $("#progress-bar").style.width = "0%";
@@ -246,7 +301,7 @@ async function loadRecent() {
     $("#recent-body").innerHTML = runs.map(run => `
       <tr>
         <td class="rc-site">${esc(run.label)}</td>
-        <td>${run.kind === "assemblage" ? "Assemblage" : "Single"}</td>
+        <td>${run.kind === "assemblage" ? "Assemblage" : run.kind === "underwrite" ? "Model" : "Single"}</td>
         <td>${run.fields}${run.flags ? ` <span class="rc-flag" title="${run.flags} field(s) need manual verification">⚑ ${run.flags}</span>` : ""}</td>
         <td class="rc-when">${esc((run.finished || "").replace("T", " "))}</td>
         <td>${run.downloadable ? `<a class="rc-dl" href="/api/download/${run.id}">Download</a>` : ""}</td>

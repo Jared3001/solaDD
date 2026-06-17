@@ -40,6 +40,7 @@
       <div class="tabs" role="tablist">
         <button class="tab active" data-mode="single" role="tab">Single address</button>
         <button class="tab" data-mode="assemblage" role="tab">Block assemblage (APNs)</button>
+        <button class="tab" data-mode="underwrite" role="tab">Financial model</button>
         <button class="tab" data-mode="sources" role="tab">Sources</button>
       </div>
 
@@ -62,6 +63,15 @@
           <p class="hint">One APN per line (or comma-separated). LA City or San Diego County parcels (auto-detected). Sums combined land area and aggregates every designation across the block (~18s).</p>
         </div>
 
+        <div class="field hidden" data-for="underwrite">
+          <label for="dd">DD checklist</label>
+          <input type="file" id="dd" name="dd" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+          <p class="hint">Upload a completed DD checklist (.xlsx) → a <strong>Stick + Modular</strong> pro-forma model (downloaded as a .zip), macros &amp; formulas preserved. The analyst's hand fields — residential stories, acquisition price, BIPOC, prevailing wage — are left blank to fill, then recalc in Excel. Or run a DD in the other tabs and click <strong>Generate financial model</strong> on the result — no re-upload.</p>
+
+          <label for="uw-name" class="om-label">Deal name <span class="om-opt">(optional)</span></label>
+          <input type="text" id="uw-name" name="name" placeholder="defaults to the site address" autocomplete="off">
+        </div>
+
         <button type="submit" id="run-btn" class="run-btn">Run feasibility</button>
         <p id="form-error" class="error-banner hidden"></p>
       </form>
@@ -74,7 +84,10 @@
             <p class="phase" id="phase">Starting…</p>
             <p class="matched" id="matched"></p>
           </div>
-          <a id="download" class="download-btn hidden" href="#">Download .xlsx</a>
+          <div class="status-actions">
+            <button id="gen-model" class="download-btn ghost hidden" type="button">Generate financial model</button>
+            <a id="download" class="download-btn hidden" href="#">Download .xlsx</a>
+          </div>
         </div>
         <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
         <p class="counts" id="counts"></p>
@@ -88,6 +101,12 @@
           <thead><tr><th>Field</th><th>OM value</th><th>Result</th><th>Source quote</th></tr></thead>
           <tbody id="om-body"></tbody>
         </table>
+      </section>
+
+      <section id="uw-panel" class="panel hidden">
+        <h2 class="recent-head">Financial model</h2>
+        <p class="hint" id="uw-sub"></p>
+        <div id="uw-body"></div>
       </section>
 
       <section id="results" class="results"></section>

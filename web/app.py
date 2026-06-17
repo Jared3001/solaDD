@@ -134,6 +134,23 @@ def api_run():
             return jsonify({"error": f"Too many APNs (max {MAX_APNS})."}), 400
         jid = jobs.create_job("assemblage", {"apns": apns})
         return jsonify({"job_id": jid})
+    if mode == "underwrite":
+        # Build the Stick + Modular pro-forma from a completed DD checklist —
+        # either an uploaded .xlsx (multipart) or a prior DD run (from_job, JSON).
+        payload = {"name": (data.get("name") or "").strip() or None}
+        dd_file = request.files.get("dd")
+        if dd_file and dd_file.filename:
+            dd_bytes = dd_file.read()
+            if not dd_bytes:
+                return jsonify({"error": "The uploaded checklist is empty."}), 400
+            payload["dd_bytes"] = dd_bytes
+            payload["dd_name"] = dd_file.filename
+        elif data.get("from_job"):
+            payload["from_job"] = data.get("from_job")
+        else:
+            return jsonify({"error": "Upload a DD checklist (.xlsx), or generate from a completed run."}), 400
+        jid = jobs.create_job("underwrite", payload)
+        return jsonify({"job_id": jid})
     return jsonify({"error": "Unknown mode."}), 400
 
 

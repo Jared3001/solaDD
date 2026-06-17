@@ -40,6 +40,7 @@ from openpyxl import load_workbook
 # Reuse the CLI pipeline verbatim — registries, runner, geocoder, readers.
 import collect as _collect            # READERS, ZIMAS_READERS
 import assemblage as _assemblage      # assess()
+import underwrite as _underwrite      # export() — DD checklist -> Stick + Modular models
 from runner import run_reader, apply_outcome
 from geocoder import geocode
 import zimas
@@ -435,6 +436,58 @@ def run_assemblage(job):
 
 
 # --------------------------------------------------------------------------- #
+# financial model — DD checklist -> Stick + Modular pro-forma (.xlsm, zipped)
+# --------------------------------------------------------------------------- #
+def run_underwrite(job):
+    inp = job["input"]
+
+    # Source DD workbook: an uploaded .xlsx, or a prior DD run's saved workbook.
+    if inp.get("dd_bytes"):
+        dd_path = RUN_DIR / f"{job['id']}_dd.xlsx"
+        dd_path.write_bytes(inp["dd_bytes"])
+    elif inp.get("from_job"):
+        prior = get_job(inp["from_job"])
+        if not prior or not prior.get("file"):
+            raise RuntimeError("Source checklist not found (it may have expired) — re-run the DD or upload the file.")
+        dd_path = Path(prior["file"])
+        job["label"] = (prior.get("label") or "") + " — financial model"
+    else:
+        raise RuntimeError("No DD checklist provided.")
+
+    job["phase"] = "Reading the DD checklist…"
+    dd = _underwrite.read_dd(dd_path)
+
+    job["phase"] = "Writing the Stick + Modular pro-forma models (preserving macros)…"
+    out_dir = RUN_DIR / f"{job['id']}_models"
+    paths, meta = _underwrite.export(dd, str(_underwrite.DEFAULT_TEMPLATE), out_dir,
+                                     deal_name=inp.get("name") or None)
+    deal = paths[0].name.split(" — ")[0]
+    job["label"] = f"{deal} — financial model"
+
+    # Bundle the two .xlsm into one download.
+    import zipfile
+    zip_path = RUN_DIR / f"{job['id']}.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in paths:
+            z.write(p, p.name)
+
+    job["underwrite"] = {
+        "deal": deal,
+        "product": meta.get("product"),
+        "resource": meta.get("resource_mapped"),
+        "flags": meta.get("flags", []),
+        "models": [p.name for p in paths],
+        "inputs": {k: _jsonable(v) for k, v in dd.items()},
+        "hand_fields": ["Residential stories (C15)", "Acquisition price",
+                        "BIPOC", "Prevailing wage"],
+    }
+    job["total"] = job["completed"] = 1
+    job["file"] = str(zip_path)
+    job["filename"] = f"{_safe_name(deal)}_models.zip"
+    job["phase"] = "Complete"
+
+
+# --------------------------------------------------------------------------- #
 # job store
 # --------------------------------------------------------------------------- #
 def _safe_name(s):
@@ -512,7 +565,7 @@ def create_job(kind, payload):
         "id": jid, "kind": kind, "status": "running", "input": payload, "label": label,
         "geo": None, "in_la_city": None, "phase": "Starting…",
         "total": 0, "completed": 0, "fields": {},
-        "parcels": None, "combined_sf": None, "om": None,
+        "parcels": None, "combined_sf": None, "om": None, "underwrite": None,
         "error": None, "file": None, "filename": None,
         "started": _now(), "finished": None,
         "_lock": threading.Lock(),
@@ -524,11 +577,15 @@ def create_job(kind, payload):
     return jid
 
 
+_RUNNERS = {"single": run_single, "assemblage": run_assemblage, "underwrite": run_underwrite}
+
+
 def _run(job):
     try:
-        run_single(job) if job["kind"] == "single" else run_assemblage(job)
+        _RUNNERS[job["kind"]](job)
         job["status"] = "done"
-        _bump_count()                  # one completed checklist = MINUTES_PER_CHECKLIST saved
+        if job["kind"] in ("single", "assemblage"):
+            _bump_count()              # one completed DD checklist = MINUTES_PER_CHECKLIST saved
     except Exception as e:
         traceback.print_exc()
         job["status"] = "error"
@@ -552,7 +609,7 @@ def public_view(job):
         "total": job["total"], "completed": job["completed"],
         "fields": fields,
         "parcels": job["parcels"], "combined_sf": job["combined_sf"],
-        "om": job.get("om"),
+        "om": job.get("om"), "underwrite": job.get("underwrite"),
         "error": job["error"], "downloadable": bool(job["file"]),
         "started": job["started"], "finished": job["finished"],
     }
