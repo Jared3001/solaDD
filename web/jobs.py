@@ -308,14 +308,24 @@ def run_single(job):
     if not address:
         raise RuntimeError("No address provided, and none could be read from the OM.")
 
-    geo = geocode(address)
+    # A ';'-separated address runs as one site (assemblage): point/tract readers
+    # use the primary (first) parcel; land_sf is summed + APNs listed across all.
+    addresses = _collect._parse_addresses(address)
+    addresses = list(addresses) if isinstance(addresses, (list, tuple)) else [addresses]
+    geos = [geocode(a) for a in addresses]
+    geo = geos[0]                          # primary parcel drives point/tract readers
+    multi = len(geos) > 1
     job["geo"] = {
         "matched_address": geo["matched_address"], "geoid": geo["geoid"],
         "lat": round(geo["lat"], 6), "lon": round(geo["lon"], 6),
     }
-    job["label"] = geo["matched_address"]
+    job["label"] = (f"{geo['matched_address']} (+{len(geos) - 1} parcels)"
+                    if multi else geo["matched_address"])
 
     active = dict(_collect.READERS)
+    if multi:                              # parcel fields are aggregated across the assemblage, not snapped to primary
+        for fid in ("address", "apn", "land_sf"):
+            active.pop(fid, None)
     in_la = False
     try:
         in_la = zimas.in_la_city(geo)      # also warms the shared parcel snap
@@ -324,9 +334,10 @@ def run_single(job):
     if in_la:
         active.update(_collect.ZIMAS_READERS)
     job["in_la_city"] = in_la
-    job["total"] = len(active)
-    job["phase"] = ("In City of LA — running ZIMAS zoning/hazard block. "
-                    if in_la else "Outside LA City — ZIMAS block skipped. ") + "Running readers…"
+    job["total"] = len(active) + (3 if multi else 0)   # +3 aggregated parcel fields
+    job["phase"] = (f"Assemblage of {len(geos)} addresses — " if multi else "") + \
+                   (("In City of LA — running ZIMAS zoning/hazard block. "
+                     if in_la else "Outside LA City — ZIMAS block skipped. ") + "Running readers…")
 
     try:
         nc._load()                         # warm the Neighborhood-Change cache once
@@ -349,11 +360,30 @@ def run_single(job):
             _record(job, fid, ans, st, notes)
             job["completed"] = len(outcomes)
 
+    # Assemblage — aggregate the parcel fields across all addresses + flag tract divergence.
+    if multi:
+        job["phase"] = f"Combining {len(geos)} parcels (summing land area, listing APNs)…"
+        agg, parts = _collect._assemble_parcels(geos)
+        tracts = sorted({g["geoid"] for g in geos})
+        if len(tracts) > 1 and agg["address"][0] == "ok":
+            agg["address"][1]["notes"] += (
+                f" ASSEMBLAGE SPANS {len(tracts)} CENSUS TRACTS ({', '.join(tracts)}) — "
+                f"tract-based fields (QCT/DDA/resource/opportunity zone/neighborhood change) "
+                f"reflect the PRIMARY parcel only; verify per parcel.")
+        outcomes.update(agg)
+        for fid in agg:
+            st, ans, notes = _display_outcome(agg[fid])
+            _record(job, fid, ans, st, notes)
+        job["parcels"] = [{"apn": p["apn"] or "(unresolved)", "n_lots": 1,
+                           "land_sf": p["area"], "geoid": p["geoid"]} for p in parts]
+        job["combined_sf"] = agg["land_sf"][1]["answer"] if agg["land_sf"][0] == "ok" else None
+        job["completed"] = len(outcomes)
+
     # Phase 2 — write the workbook once (reuses apply_outcome for the real file).
     wb = load_workbook(TEMPLATE)
     ws, log = wb["Site DD"], wb["State Log"]
     ts = _now()
-    for fid in active:
+    for fid in outcomes:
         apply_outcome(ws, log, FIELD_BY_ID[fid], outcomes[fid],
                       property_id=job["input"].get("property_id") or "WEB", ts=ts)
 

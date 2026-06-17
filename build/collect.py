@@ -133,7 +133,7 @@ def _assemble_parcels(geos):
         if key in seen:                 # two addresses on the same parcel -> count once
             continue
         seen.add(key)
-        parts.append({"addr": addr, "apn": ap, "area": lo["answer"],
+        parts.append({"addr": addr, "apn": ap, "area": lo["answer"], "geoid": g.get("geoid"),
                       "matched": lo.get("state", "VERIFIED") == "VERIFIED"})
 
     clean = bool(parts) and all(p["matched"] for p in parts) and not fails
@@ -157,7 +157,7 @@ def _assemble_parcels(geos):
         if fails:
             note += " UNSIZED: " + "; ".join(a for a, _ in fails) + " — verify."
         out["land_sf"] = ("ok", {"answer": total, "state": state, "notes": note})
-    return out
+    return out, parts
 
 
 def collect(wb_path, address, property_id=None, workers=10):
@@ -204,7 +204,7 @@ def collect(wb_path, address, property_id=None, workers=10):
 
     # Assemblage — aggregate the parcel fields across all addresses + flag tract divergence.
     if multi:
-        agg = _assemble_parcels(geos)
+        agg, _parts = _assemble_parcels(geos)
         tracts = sorted({g["geoid"] for g in geos})
         if len(tracts) > 1:
             warn = (f"ASSEMBLAGE SPANS {len(tracts)} CENSUS TRACTS ({', '.join(tracts)}) — "

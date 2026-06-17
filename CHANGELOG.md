@@ -15,8 +15,12 @@ alternative to the APN-keyed web assemblage. Pass a `;`-separated address string
 - Verified end-to-end: two S Main St parcels summed (24,220 + 12,893 = 37,113 sf),
   both APNs listed, flows through `underwrite.py` to model `C12`. Addresses the
   parcel-selection gap the 3-deal QC found (Colima/Bellflower assemblages).
-- NOTE: the web front end (`web/jobs.py`) still does assemblage by **APN**
-  (`run_assemblage`); wiring the multi-address path into the web UI is a follow-up.
+- **Web front end wired too**: `run_single` in `web/jobs.py` now detects a
+  `;`-separated address, runs the assemblage (primary parcel for point/tract
+  readers, summed land_sf + listed APNs), surfaces the per-parcel breakdown and
+  combined SF, and flags multi-tract assemblages — same UX as the APN tab. The
+  address box hint tells users they can enter several addresses with `;`. (The
+  APN `run_assemblage` path is unchanged — both options coexist.)
 
 ## v0.14-draft (2026-06-16) — underwriting exporter (DD → two pro-forma models)
 First-pass underwriting models now auto-generate from a completed DD checklist.
