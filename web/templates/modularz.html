@@ -2257,6 +2257,24 @@ function buildInputPatches(model) {
     add('Dashboard', 'J12', I.constrRate);
     add('Dashboard', 'K12', I.permRate);
 
+    // Sensitivity data-table AXIS CENTERS. The .xlsx what-if tables (Exit Cap x
+    // Hold, Exit Cap x Rent Growth, etc.) center their axes on these cells; the
+    // template hard-codes them to the baked deal (~6.75% cap, 84mo hold), so for
+    // an off-baseline deal the Exit-Cap tables sit far above the deal's cap, the
+    // IRR has no solution there, and IFERROR(...,0) renders the whole table as 0.
+    // Recenter each axis on the deal's actual values (neighbors are formulas off
+    // these centers, so writing the center recenters the axis).
+    add('Dashboard', 'E19', I.constrRate);   // C20 table: interest-rate axis
+    add('Dashboard', 'B22', I.constrLTC);    // C20 table: LTC axis
+    add('Dashboard', 'M19', I.exitCap);      // K20 table: Exit Cap axis (x Hold)
+    add('Dashboard', 'J22', I.holdMonths);   // K20 table: Hold axis
+    add('Dashboard', 'E28', I.onsiteCostPU); // C29 table: onsite axis
+    add('Dashboard', 'B31', I.constrMonths); // C29 table: construction-months axis
+    add('Dashboard', 'M28', I.permRate);     // K29 table: perm-rate axis
+    add('Dashboard', 'J31', I.holdMonths);   // K29 table: Hold axis
+    add('Dashboard', 'E37', I.exitCap);      // C38 table: Exit Cap axis (x Rent Growth)
+    add('Dashboard', 'B40', I.rentGrowth);   // C38 table: Rent Growth axis
+
     // ----- (Z+) Dev Budget sheet (sheet3) -----
     add('(Z+) Dev Budget', 'G7', I.landCost);
     // Modular construction cost per unit by bed type (the modular price book).
