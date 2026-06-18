@@ -521,8 +521,8 @@ body { flex-direction: column; }
                 <h4>Affordability — CTCAC AMI Rents</h4>
                 <ul class="detail-list">
                     <li><span>County (from ZIP)</span><span id="aff-county">—</span></li>
-                    <li><span>AMI tier</span><select id="aff-tier" onchange="updateAffordability()">
-                        <option value="market">Market (no cap)</option>
+                    <li><span>AMI tier</span><select id="aff-tier" onchange="applyAffordability()">
+                        <option value="market">Market (use comp rent)</option>
                         <option value="110">110% AMI (approx)</option>
                         <option value="100">100% AMI</option>
                         <option value="80" selected>80% AMI</option>
@@ -531,13 +531,13 @@ body { flex-direction: column; }
                         <option value="40">40% AMI</option>
                         <option value="30">30% AMI</option>
                     </select></li>
-                    <li><span>Utility allowance /unit/mo</span><input type="number" id="aff-util" min="0" value="0" oninput="updateAffordability()"></li>
+                    <li><span>Utility allowance /unit/mo</span><input type="number" id="aff-util" min="0" value="0" oninput="applyAffordability()"></li>
                     <li><span>1-BR cap (net)</span><span id="aff-br1">—</span></li>
                     <li><span>2-BR cap (net)</span><span id="aff-br2">—</span></li>
                     <li><span>3-BR cap (net)</span><span id="aff-br3">—</span></li>
                     <li><span>Blended cap</span><span id="aff-blended">—</span></li>
                 </ul>
-                <p style="font-size: 10.5px; color: var(--text-muted); margin-top: 6px;">CTCAC 2025 MTSP gross caps, netted by the utility allowance. Preview only — not yet wired into the proforma (pending Rent Roll inputs).</p>
+                <p style="font-size: 10.5px; color: var(--text-muted); margin-top: 6px;">CTCAC 2025 MTSP gross caps, netted by the utility allowance. <b>Drives the proforma</b> — units are allocated by bed mix and these rents feed NOI/IRR + the download. Choose <i>Market</i> to use the comp rent instead.</p>
             </div>
 
             <div class="backend-panel" style="background: var(--bg-deep); color: white; border-color: var(--bg-deep);">
@@ -1482,6 +1482,15 @@ function updateAffordability() {
     set('aff-blended', fMoney(blended) + ' /unit/mo');
 }
 
+// Changing the AMI tier / utility allowance refreshes the preview AND recomputes
+// the proforma (buildInputPatches reads these controls), so tiles + grids + the
+// download all reflect the selected affordable rents.
+function applyAffordability() {
+    updateAffordability();
+    if (typeof scheduleEngine === 'function') scheduleEngine();
+    if (typeof buildSensiTable === 'function') buildSensiTable();
+}
+
 function renderDeltas(res) {
     if (!compareMode || !snapshot) {
         ['irr', 'moic', 'coc', 'yoc', 'spread', 'tdc', 'ppu', 'noi', 'dscr', 'equity'].forEach(k => {
@@ -2237,6 +2246,46 @@ function buildInputPatches(model) {
     add('(Z+) Financing', 'H11', I.permDSCR);
     add('(Z+) Financing', 'H21', I.permAmort);
 
+    // ----- (Z+) Rent Roll: affordable (CTCAC AMI) rents + bed-mix allocation -----
+    for (const ap of affRentRollPatches(model)) P.push(ap);
+
+    return P;
+}
+
+// When an AMI tier is selected (affordable mode), drive the Rent Roll directly:
+//  (1) allocate the deal's bed mix into the affordable rows 12/13/14/15
+//      (1-BR/studio/2-BR/3-BR), overriding the template's studio-forced default;
+//  (2) write the CTCAC net caps (gross cap minus utility allowance) as the
+//      per-row rents (I = Voucher Pmt, K = Adj. Rents -> feed the K20 blended
+//      rent that drives revenue).
+// Returns [] in 'market' mode or when the county can't be resolved, leaving the
+// template's existing (baked) behavior untouched.
+function affRentRollPatches(model) {
+    if (typeof window.HUD_RENTS === 'undefined') return [];
+    const tierSel = document.getElementById('aff-tier');
+    const tier = tierSel ? tierSel.value : 'market';
+    if (tier === 'market') return [];
+    const fips = (typeof affResolveFips === 'function') ? affResolveFips(model) : null;
+    const c = fips ? HUD_RENTS.counties[fips] : null;
+    if (!c || !c.rents[tier]) return [];
+    const utilEl = document.getElementById('aff-util');
+    const util = utilEl ? (parseFloat(utilEl.value) || 0) : 0;
+    const r = c.rents[tier];
+    const net = v => Math.max(0, Math.round((v || 0) - util));
+    const RR = '(Z+) Rent Roll';
+    const P = [];
+    const add = (addr, val) => P.push({ sheet: RR, addr, value: val, isStr: false });
+    let u1 = model.units1BR || 0, u2 = model.units2BR || 0, u3 = model.units3BR || 0;
+    if (u1 + u2 + u3 !== (model.units || 0)) { u1 = model.units || 0; u2 = 0; u3 = 0; }
+    // (1) allocation — all units into the affordable block by bed type; zero the
+    //     rest (incl. row 7, a template base row that otherwise leaves a stray unit).
+    ['E7', 'E8', 'E9', 'E10', 'E11', 'E16', 'E17', 'E18', 'E19'].forEach(a => add(a, 0));
+    add('E12', u1); add('E13', 0); add('E14', u2); add('E15', u3);
+    // (2) rents (net caps) by bed: row12=1BR, row13=studio, row14=2BR, row15=3BR.
+    add('I12', net(r.br1)); add('K12', net(r.br1));
+    add('I13', net(r.studio)); add('K13', net(r.studio));
+    add('I14', net(r.br2)); add('K14', net(r.br2));
+    add('I15', net(r.br3)); add('K15', net(r.br3));
     return P;
 }
 
@@ -2484,7 +2533,8 @@ async function downloadProforma() {
         'Inputs': 'xl/worksheets/sheet1.xml',
         'Dashboard': 'xl/worksheets/sheet2.xml',
         '(Z+) Dev Budget': 'xl/worksheets/sheet3.xml',
-        '(Z+) Financing': 'xl/worksheets/sheet5.xml'
+        '(Z+) Financing': 'xl/worksheets/sheet5.xml',
+        '(Z+) Rent Roll': 'xl/worksheets/sheet6.xml'
     };
     const bySheet = {};
     for (const p of buildInputPatches(model)) (bySheet[p.sheet] = bySheet[p.sheet] || []).push(p);
