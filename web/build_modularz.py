@@ -507,6 +507,22 @@ function buildSensiTableJS() {'''
         sys.exit("chat IRR block not found uniquely")
     html = html.replace(old_chat, new_chat, 1)
 
+    # ---- 6c. IRR sanity clamp: __xirr can blow up (e.g. 1e278%) when equity is
+    #     ~wiped on a catastrophic deal. Treat non-finite / absurd (|IRR|>1000%)
+    #     as null so the tile/grid show "—" instead of garbage.
+    old_irr = "            irr: irrLev, irrUn,"
+    new_irr = ("            irr: (isFinite(irrLev) && Math.abs(irrLev) <= 10) ? irrLev : null,\n"
+               "            irrUn: (isFinite(irrUn) && Math.abs(irrUn) <= 10) ? irrUn : null,")
+    if html.count(old_irr) != 1:
+        sys.exit("IRR clamp anchor (computeEngineReturns) not found uniquely")
+    html = html.replace(old_irr, new_irr, 1)
+
+    old_grid_irr = "return __xirr(vals, dates); };"
+    new_grid_irr = "const __ir = __xirr(vals, dates); return (isFinite(__ir) && Math.abs(__ir) <= 10) ? __ir : null; };"
+    if html.count(old_grid_irr) != 1:
+        sys.exit("IRR clamp anchor (grid) not found uniquely")
+    html = html.replace(old_grid_irr, new_grid_irr, 1)
+
     # ---- 7. AFFORDABILITY (CTCAC AMI rents) preview — Workstreams B/C/E ------
     # 7a. Load the generated data layers (rents + ZIP->county crosswalk) before
     #     the main script. Served from Flask's /static.

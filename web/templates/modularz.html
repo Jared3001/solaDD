@@ -1550,7 +1550,7 @@ function buildSensiEngine() {
         const cF = __colToIdx('F'), cDM = __colToIdx('DM');
         const toNum = v => { if (v instanceof Date) return Math.round((Date.UTC(v.getFullYear(), v.getMonth(), v.getDate()) - Date.UTC(1899, 11, 30)) / 86400000); return (typeof v === 'number') ? v : null; };
         const setCell = (sheet, a1, val) => { const s = hf.getSheetId(sheet); const ad = XLSX.utils.decode_cell(a1); hf.setCellContents({ sheet: s, row: ad.r, col: ad.c }, [[val]]); };
-        const leveredIRR = () => { const dates = [], vals = []; for (let c = cF; c <= cDM; c++) { dates.push(toNum(hf.getCellValue({ sheet: sid, row: 3, col: c }))); const vv = hf.getCellValue({ sheet: sid, row: 99, col: c }); vals.push(typeof vv === 'number' ? vv : 0); } return __xirr(vals, dates); };
+        const leveredIRR = () => { const dates = [], vals = []; for (let c = cF; c <= cDM; c++) { dates.push(toNum(hf.getCellValue({ sheet: sid, row: 3, col: c }))); const vv = hf.getCellValue({ sheet: sid, row: 99, col: c }); vals.push(typeof vv === 'number' ? vv : 0); } const __ir = __xirr(vals, dates); return (isFinite(__ir) && Math.abs(__ir) <= 10) ? __ir : null; };
         let html = '';
         if (activeSensi === 'returns') {
             const capSteps = [-0.0075, -0.0025, 0, 0.0025, 0.0075];
@@ -2408,7 +2408,8 @@ function computeEngineReturns(model) {
         const leverProfit = __engineNum(hf, '(Z+) Financing', 'K14');
         const tdc = __engineNum(hf, '(Z+) Dev Budget', 'G126');
         const out = {
-            irr: irrLev, irrUn,
+            irr: (isFinite(irrLev) && Math.abs(irrLev) <= 10) ? irrLev : null,
+            irrUn: (isFinite(irrUn) && Math.abs(irrUn) <= 10) ? irrUn : null,
             moic: eqMult,
             coc: __engineNum(hf, '(Z+) Financing', 'K8'),   // levered cash-on-cash: (NOI - debt svc)/equity
             yoc: __engineNum(hf, '(Z+) Financing', 'K11'),  // yield on cost: NOI / TDC
