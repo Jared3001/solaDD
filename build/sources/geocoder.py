@@ -20,10 +20,19 @@ NOMINATIM = "https://nominatim.openstreetmap.org/search"
 BENCHMARK, VINTAGE = "Public_AR_Current", "Current_Current"
 
 
+# California bounding box (lon_left, lat_top, lon_right, lat_bottom). The OSM
+# fallback is constrained to this box so a bare street (no city/state) snaps to
+# the CA match rather than a same-named road in another state — see _nominatim.
+CA_VIEWBOX = "-124.55,42.10,-114.13,32.50"
+
+
 def _nominatim(address, timeout=30):
     """OSM fallback geocoder for addresses the Census geocoder can't match.
+    Constrained to California (this tool is CA-only) so an ambiguous one-line
+    address can't escape to a same-named street in another state.
     Returns (lon, lat, display_name) or None."""
-    q = urllib.parse.urlencode({"q": address, "format": "json", "limit": 1, "countrycodes": "us"})
+    q = urllib.parse.urlencode({"q": address, "format": "json", "limit": 1,
+                                "countrycodes": "us", "viewbox": CA_VIEWBOX, "bounded": 1})
     req = urllib.request.Request(f"{NOMINATIM}?{q}", headers={"User-Agent": "solaDD/1.0 (DD automation)"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -65,6 +74,20 @@ def _place(geographies):
     return name or None
 
 
+def _require_ca(geo, address):
+    """This tool only covers California. A point outside CA (state FIPS != 06)
+    almost always means an ambiguous address (no city/state) matched a same-named
+    street in another state — fail loudly with a fix-it hint instead of running
+    every reader against a wrong-state point and surfacing them all as TOOL-FAIL."""
+    if geo.get("state_fips") != "06":
+        raise LookupError(
+            f"{address!r} geocoded outside California (state FIPS {geo.get('state_fips')!r}, "
+            f"place {geo.get('place')!r}). This tool only covers CA — add the city and state "
+            f"(e.g. '{address}, CA') and re-run."
+        )
+    return geo
+
+
 def geocode(address: str, timeout: int = 30) -> dict:
     q = urllib.parse.urlencode(
         {"address": address, "benchmark": BENCHMARK, "vintage": VINTAGE, "format": "json"}
@@ -72,25 +95,25 @@ def geocode(address: str, timeout: int = 30) -> dict:
     data = _get_json(f"{BASE}?{q}", timeout)
     matches = data.get("result", {}).get("addressMatches", [])
     if not matches:
-        # Census couldn't match — fall back to OSM for lon/lat, then resolve the
-        # census tract from those coordinates (tract is what HUD/OZ/TCAC/NC need).
+        # Census couldn't match — fall back to OSM (CA-bounded) for lon/lat, then
+        # resolve the census tract from those coordinates (tract is what HUD/OZ/TCAC/NC need).
         nm = _nominatim(address, timeout)
         if nm:
             lon, lat, _disp = nm
             geo = geocode_point(lon, lat, timeout)
             geo["matched_address"] = address   # keep the input (has the house number) for parcel matching
-            return geo
+            return _require_ca(geo, address)
         raise LookupError(f"no geocoder match for {address!r}")
     m = matches[0]
     c = m["coordinates"]                                   # x=lon, y=lat
     t = m["geographies"]["Census Tracts"][0]
-    return {
+    return _require_ca({
         "matched_address": m["matchedAddress"],
         "lat": c["y"], "lon": c["x"],
         "state_fips": t["STATE"], "county_fips": t["COUNTY"],
         "tract": t["TRACT"], "geoid": t["GEOID"],          # 11-digit tract id for HUD/TCAC/OZ lookups
         "place": _place(m["geographies"]),                 # incorporated city (None = unincorporated)
-    }
+    }, address)
 
 
 def geocode_point(lon: float, lat: float, timeout: int = 30) -> dict:
