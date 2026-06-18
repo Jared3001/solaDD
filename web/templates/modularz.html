@@ -370,31 +370,31 @@ body { flex-direction: column; }
 
                 <div class="lever-group">
                     <div class="lever-header"><span>Vacancy</span><span class="lever-val" id="val-vac">5.0%</span></div>
-                    <input type="range" id="inp-vac" min="2" max="15" step="0.5" value="5" oninput="updateModelFromUI()">
+                    <input type="range" id="inp-vac" min="2" max="15" step="0.5" value="5" oninput="previewLever('val-vac', this.value, 1)" onchange="updateModelFromUI()">
                     <div class="lever-range"><span>2%</span><span>15%</span></div>
                 </div>
 
                 <div class="lever-group">
                     <div class="lever-header"><span>Exit Cap Rate</span><span class="lever-val" id="val-cap">5.50%</span></div>
-                    <input type="range" id="inp-cap" min="4" max="8" step="0.05" value="5.5" oninput="updateModelFromUI()">
+                    <input type="range" id="inp-cap" min="4" max="8" step="0.05" value="5.5" oninput="previewLever('val-cap', this.value, 2)" onchange="updateModelFromUI()">
                     <div class="lever-range"><span>4.00%</span><span>8.00%</span></div>
                 </div>
 
                 <div class="lever-group">
                     <div class="lever-header"><span>Annual Rent Growth</span><span class="lever-val" id="val-rg">2.5%</span></div>
-                    <input type="range" id="inp-rg" min="0" max="6" step="0.25" value="2.5" oninput="updateModelFromUI()">
+                    <input type="range" id="inp-rg" min="0" max="6" step="0.25" value="2.5" oninput="previewLever('val-rg', this.value, 2)" onchange="updateModelFromUI()">
                     <div class="lever-range"><span>0%</span><span>6%</span></div>
                 </div>
 
                 <div class="lever-group">
                     <div class="lever-header"><span>Perm Interest Rate</span><span class="lever-val" id="val-int">6.25%</span></div>
-                    <input type="range" id="inp-int" min="4" max="9" step="0.125" value="6.25" oninput="updateModelFromUI()">
+                    <input type="range" id="inp-int" min="4" max="9" step="0.125" value="6.25" oninput="previewLever('val-int', this.value, 2)" onchange="updateModelFromUI()">
                     <div class="lever-range"><span>4%</span><span>9%</span></div>
                 </div>
 
                 <div class="lever-group">
                     <div class="lever-header"><span>Loan-to-Cost</span><span class="lever-val" id="val-ltc">65%</span></div>
-                    <input type="range" id="inp-ltc" min="40" max="75" step="1" value="65" oninput="updateModelFromUI()">
+                    <input type="range" id="inp-ltc" min="40" max="75" step="1" value="65" oninput="previewLever('val-ltc', this.value, 0)" onchange="updateModelFromUI()">
                     <div class="lever-range"><span>40%</span><span>75%</span></div>
                 </div>
             </div>
@@ -2059,6 +2059,13 @@ function refreshMixCheck() {
     } else {
         el.innerHTML = `<span style="color:var(--warn);">${sum} of ${tgt} (diff ${sum > tgt ? '+' : ''}${sum - tgt})</span>`;
     }
+}
+
+// Live label update while dragging — refreshes only the readout next to the
+// slider, NOT the model/KPIs (those wait for onchange / value selection).
+function previewLever(labelId, val, decimals) {
+    const el = document.getElementById(labelId);
+    if (el) el.innerText = parseFloat(val).toFixed(decimals) + '%';
 }
 
 function updateModelFromUI() {
