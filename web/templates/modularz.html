@@ -305,7 +305,7 @@ body { flex-direction: column; }
 
         <div class="tab-nav" role="tablist">
             <button class="tab-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">Dashboard</button>
-            <button class="tab-btn" data-tab="backend" onclick="switchTab('backend')">Backend</button>
+            <button class="tab-btn" data-tab="backend" onclick="switchTab('backend')">Inputs</button>
             <button class="tab-btn" data-tab="proforma" onclick="switchTab('proforma')">Full Proforma</button>
         </div>
 
@@ -384,7 +384,7 @@ body { flex-direction: column; }
                 <div class="panel-header"><span>Interactive Levers</span><span class="badge">Live</span></div>
 
                 <!-- MAX LAND PRICE DISPLAY (mechanism 1): read-only ceiling -->
-                <div class="maxland-box" id="maxland-box" title="The highest land price that still hits the all-in cost-per-unit target. Buy at or below this and the deal pencils (dev spread >= 0); pay more and returns go negative. Change the target in the Backend tab (Hard Costs).">
+                <div class="maxland-box" id="maxland-box" title="The highest land price that still hits the all-in cost-per-unit target. Buy at or below this and the deal pencils (dev spread >= 0); pay more and returns go negative. Change the target in the Inputs tab (Hard Costs).">
                     <div class="maxland-label">Max Land Price <span class="maxland-sub">to pencil @ <span id="maxland-target">$350K</span>/unit</span></div>
                     <div class="maxland-figs"><span class="maxland-val" id="maxland-val">&mdash;</span><span class="maxland-pu" id="maxland-pu"></span></div>
                 </div>
@@ -1942,9 +1942,9 @@ function loadDeal(m, units) {
     }[m._matchType] || 'Comp Set';
 
     const provNote = {
-        'state': '<br><span style="color:var(--warn); font-size:11px;">⚠ No submarket-level comps for this location — using regional tier defaults. Sanity-check or adjust in Backend tab.</span>',
+        'state': '<br><span style="color:var(--warn); font-size:11px;">⚠ No submarket-level comps for this location — using regional tier defaults. Sanity-check or adjust in Inputs tab.</span>',
         'ai': '<br><span style="color:var(--accent); font-size:11px;">✨ Pulled via live AI research. Review before committing.</span>',
-        'fallback': '<br><span style="color:var(--warn); font-size:11px;">⚠ Couldn\'t reach the AI research API and don\'t have a direct comp set — using a coastal-moderate default. Edit any number in the Backend tab.</span>'
+        'fallback': '<br><span style="color:var(--warn); font-size:11px;">⚠ Couldn\'t reach the AI research API and don\'t have a direct comp set — using a coastal-moderate default. Edit any number in the Inputs tab.</span>'
     }[m._matchType] || '';
 
     const html = `<b>🔍 Market Research — ${m.name}</b><br>
@@ -1955,7 +1955,7 @@ function loadDeal(m, units) {
         <div class="data-line"><span>3-Yr Rent Growth</span><span>${(m.rg3yr*100).toFixed(1)}%</span></div>
         <div class="data-line"><span>Hard Cost</span><span>$${m.hardCost}/GSF</span></div>
         <div class="data-line"><span>Market Land (asking)</span><span>$${m.landPerSf}/buildable SF</span></div>
-        <div class="data-line"><span>Modeled Land</span><span>max @ $${Math.round((model.targetPPU||350000)/1000)}K/unit · see Backend</span></div>
+        <div class="data-line"><span>Modeled Land</span><span>max @ $${Math.round((model.targetPPU||350000)/1000)}K/unit · see Inputs</span></div>
         <div class="data-line"><span>OpEx Ratio</span><span>${(m.opex*100).toFixed(0)}% of EGI</span></div>
         <div class="data-line"><span>Source</span><span>${provLabel}</span></div>
         ${provNote}

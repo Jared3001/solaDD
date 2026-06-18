@@ -954,6 +954,20 @@ function updateModelFromUI() {'''
         sys.exit("updateUI be-land sync anchor not found uniquely")
     html = html.replace(old_uiland, new_uiland, 1)
 
+    # 12. Rename the user-facing "Backend" tab to "Inputs" (label + prose
+    #     references only; the data-tab/switchTab/id identifiers stay 'backend').
+    old_backend_btn = ('<button class="tab-btn" data-tab="backend" '
+                       'onclick="switchTab(\'backend\')">Backend</button>')
+    new_backend_btn = ('<button class="tab-btn" data-tab="backend" '
+                       'onclick="switchTab(\'backend\')">Inputs</button>')
+    if html.count(old_backend_btn) != 1:
+        sys.exit("Backend tab button not found uniquely")
+    html = html.replace(old_backend_btn, new_backend_btn, 1)
+    # keep prose pointing at the tab consistent with its new name
+    html = html.replace("the Backend tab", "the Inputs tab")
+    html = html.replace("in Backend tab", "in Inputs tab")
+    html = html.replace("· see Backend", "· see Inputs")
+
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:
         f.write(html)
