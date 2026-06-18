@@ -44,6 +44,8 @@ import underwrite as _underwrite      # export() — DD checklist -> Stick + Mod
 from runner import run_reader, apply_outcome
 from geocoder import geocode
 import zimas
+import lacounty
+from jurisdiction import _county_basename
 import nc
 
 TEMPLATE = ROOT / "template" / "Checklist_BLANK_master.xlsx"
@@ -123,22 +125,24 @@ SOURCE_CATALOG = {
     "local": {
         "label": "Local / jurisdictional",
         "blurb": ("Zoning, parcel and entitlement data come from each jurisdiction's own GIS, so the source "
-                  "varies by city & county. Active: City of Los Angeles and City of San Diego (plus county "
-                  "parcel layers). Parcels in other cities route to manual review."),
-        "cols": ["Field", "Los Angeles", "San Diego"],
+                  "varies by city & county. Active: City of Los Angeles (ZIMAS), unincorporated LA County "
+                  "(County DRP), and City of San Diego (plus county parcel layers). Unincorporated parcels "
+                  "are governed by County Title 22, not the City LAMC. Parcels in other incorporated cities "
+                  "route to manual review."),
+        "cols": ["Field", "Los Angeles (City)", "Unincorporated LA County", "San Diego"],
         "rows": [
-            {"field": "APN / parcel ID", "la": "LA City / County Parcels", "sd": "SANDAG County Parcels"},
-            {"field": "Land area (SF)", "la": "LA City / County Parcels (EPSG:2229)", "sd": "SANDAG County Parcels (EPSG:2230)"},
-            {"field": "Zoning", "la": "ZIMAS / NavigateLA", "sd": "City of San Diego — Base Zones"},
-            {"field": "Specific plan / overlay", "la": "ZIMAS / NavigateLA", "sd": "City of San Diego — DSD Zoning Overlay"},
-            {"field": "Council / supervisor district", "la": "ZIMAS / NavigateLA", "sd": "City of San Diego — DoIT public layers"},
-            {"field": "Historic status", "la": "ZIMAS / SurveyLA", "sd": "City of San Diego — Historic Preservation"},
-            {"field": "TOC / transit tier", "la": "LA City Planning — TOC", "sd": "SD Transit Priority Area"},
-            {"field": "½-mile major transit", "la": "LA City Planning", "sd": "SD Transit Priority Area (SB 743)"},
-            {"field": "Airport hazard zone", "la": "LA County ALUC (A-NET)", "sd": "City of San Diego — DSD Airports (ALUC)"},
-            {"field": "Q conditions", "la": "ZIMAS / NavigateLA", "sd": "N/A — LA-only zoning concept"},
-            {"field": "Methane hazard zone", "la": "ZIMAS / NavigateLA", "sd": "N/A — LA-only zoning concept"},
-            {"field": "Transitional height", "la": "Derived (LAMC)", "sd": "N/A — LA-only zoning concept"},
+            {"field": "APN / parcel ID", "la": "LA City / County Parcels", "county": "LA County Assessor parcels", "sd": "SANDAG County Parcels"},
+            {"field": "Land area (SF)", "la": "LA City / County Parcels (EPSG:2229)", "county": "LA County Assessor (EPSG:2229)", "sd": "SANDAG County Parcels (EPSG:2230)"},
+            {"field": "Zoning", "la": "ZIMAS / NavigateLA", "county": "County DRP — Zoning (Title 22) + General Plan", "sd": "City of San Diego — Base Zones"},
+            {"field": "Specific plan / overlay", "la": "ZIMAS / NavigateLA", "county": "County DRP — SP zone / CSD / Zoned District / SEA", "sd": "City of San Diego — DSD Zoning Overlay"},
+            {"field": "Council / supervisor district", "la": "ZIMAS / NavigateLA", "county": "County — Supervisorial District", "sd": "City of San Diego — DoIT public layers"},
+            {"field": "Historic status", "la": "ZIMAS / SurveyLA", "county": "Manual — no County REST layer", "sd": "City of San Diego — Historic Preservation"},
+            {"field": "TOC / transit tier", "la": "LA City Planning — TOC", "county": "County DRP — Transit Oriented District (TOD)", "sd": "SD Transit Priority Area"},
+            {"field": "½-mile major transit", "la": "LA City Planning", "county": "Derived from County TOD (JUDGMENT)", "sd": "SD Transit Priority Area (SB 743)"},
+            {"field": "Airport hazard zone", "la": "LA County ALUC (A-NET)", "county": "LA County ALUC (A-NET)", "sd": "City of San Diego — DSD Airports (ALUC)"},
+            {"field": "Q conditions", "la": "ZIMAS / NavigateLA", "county": "N/A — LA-City-only zoning concept", "sd": "N/A — LA-only zoning concept"},
+            {"field": "Methane hazard zone", "la": "ZIMAS / NavigateLA", "county": "N/A — LA-City-only zoning concept", "sd": "N/A — LA-only zoning concept"},
+            {"field": "Transitional height", "la": "Derived (LAMC)", "county": "N/A — LA-City-only (LAMC) concept", "sd": "N/A — LA-only zoning concept"},
         ],
     },
 }
@@ -330,17 +334,34 @@ def run_single(job):
         for fid in ("address", "apn", "land_sf"):
             active.pop(fid, None)
     in_la = False
+    block = None        # which municipal block ran: "la_city" | "la_county" | "san_diego" | None
     try:
         in_la = zimas.in_la_city(geo)      # also warms the shared parcel snap
     except Exception:
         pass
     if in_la:
         active.update(_collect.ZIMAS_READERS)
+        block = "la_city"
+    else:
+        try:
+            if _county_basename(geo) == "Los Angeles" and lacounty.is_unincorporated(geo):
+                active.update(_collect.LACOUNTY_READERS)
+                block = "la_county"
+            elif _county_basename(geo) == "San Diego":
+                active.update(_collect.SD_READERS)
+                block = "san_diego"
+        except Exception:
+            pass
     job["in_la_city"] = in_la
+    job["block"] = block
     job["total"] = len(active) + (3 if multi else 0)   # +3 aggregated parcel fields
+    _block_phase = {
+        "la_city": "In City of LA — running ZIMAS zoning/hazard block. ",
+        "la_county": "In unincorporated LA County — running LA County (DRP) zoning/land-use block. ",
+        "san_diego": "In the City of San Diego — running SD municipal block. ",
+    }.get(block, "Outside LA City / unincorporated LA County / San Diego — municipal block skipped. ")
     job["phase"] = (f"Assemblage of {len(geos)} addresses — " if multi else "") + \
-                   (("In City of LA — running ZIMAS zoning/hazard block. "
-                     if in_la else "Outside LA City — ZIMAS block skipped. ") + "Running readers…")
+                   _block_phase + "Running readers…"
 
     try:
         nc._load()                         # warm the Neighborhood-Change cache once

@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.18-draft (2026-06-18) — unincorporated-LA-County zoning block + jurisdiction-routing fix
+Integrates the Slauson Ave (1550–1570 E. Slauson, Florence-Firestone) feedback:
+the site is in **unincorporated LA County**, which is a different GIS and a different
+set of metrics than LA City. Two changes:
+
+- **New `build/sources/lacounty.py`** — the County analog of `zimas.py`/`sandiego.py`,
+  reading the LA County Dept. of Regional Planning (DRP) open ArcGIS REST layers
+  (`public.gis.lacounty.gov/.../DRP/Open_Data`): Title-22 **zoning** (L3, + General
+  Plan land use L8), **specific_plan_overlay** (SP zone + CSD L4 + Zoned District L25
+  + named specific plans + SEA L12), **supervisor district** (Political L27 — County
+  Supervisor, not a Council member), and **TOD** (L23, the County's transit-oriented
+  district in the TOC/Tier cell; `half_mile_major_transit` + `tier_transit_verification`
+  derived from it → JUDGMENT). The LA-City LAMC concepts (`q_conditions_la`,
+  `methane_hazard_zone_la`, `transitional_height_adj_zones`) are N/A here; `historic_status`
+  stays manual (no County REST layer). `land_sf`/`apn` already resolve via the LA County
+  Assessor layer. Wired into `collect.py` as a third router branch (`LACOUNTY_READERS`),
+  gated on `_county_basename == "Los Angeles" and lacounty.is_unincorporated()`.
+- **Jurisdiction-routing fix** — `zimas.in_la_city()` now decides LA-City membership
+  from the authoritative LA County **City-Boundaries polygon** (Political L19) instead
+  of a 150 m parcel snap. The snap alone misrouted this site: the geocoded point sat
+  ~97 m from an LA-City parcel across Slauson Ave (APN 5105-019-015, "1609 E Slauson"),
+  so the pipeline grabbed that neighbor and reported its `CM-2D-CPIO` zoning for an
+  unincorporated parcel. The boundary polygon is address-independent and also corrects
+  `geographic_pool` (City of LA vs Balance of LA County), `apn`, and `land_sf` for these
+  border parcels. Falls back to the snap test only outside County boundary coverage.
+- **Verified live** end-to-end on the real site (single + 4-parcel assemblage): routes
+  to the County block, returns `SP — Florence-Firestone` zoning, Florence-Firestone TOD
+  (Metro Blue Line), Supervisorial District 2, APN 6008-034-001…004, 18,299 sf summed.
+  Regression-checked routing: LA City → ZIMAS, Santa Monica → manual, San Diego → SD.
+
 ## v0.17-draft (2026-06-17) — completed checklists: persistent + one-click to model
 Builds on the Financial model tab (v0.16):
 - The recent panel ("Completed checklists") is shown up front, and each DD-checklist

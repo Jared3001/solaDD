@@ -34,7 +34,7 @@ from openpyxl import load_workbook
 from runner import run_reader, apply_outcome
 from geocoder import geocode
 import fema, hud, tcac, oz, calfire, calgem, cgs, ust, zimas, jurisdiction, parcel, nc, pha
-import places, slope, towers, airport, coastal, sandiego
+import places, slope, towers, airport, coastal, sandiego, lacounty
 from jurisdiction import _county_basename
 
 # field id -> reader callable(geo) -> {"answer","notes"} (or raises -> TOOL-FAIL)
@@ -102,6 +102,23 @@ SD_READERS = {
     "toc_tier_la": sandiego.transit_priority_area,   # SD Transit Priority Area in the TOC/Tier cell
     "half_mile_major_transit": sandiego.half_mile_major_transit,
     "tier_transit_verification": sandiego.tier_transit_verification,
+}
+
+# Unincorporated-LA-County zoning/land-use block (the County analog of ZIMAS) —
+# only run when the parcel is in unincorporated LA County (DRP is County-only;
+# incorporated cities route to local planning). Different GIS + metrics than LA
+# City: County Title 22 zoning, General Plan land use, CSD/Zoned District,
+# Supervisorial District, and TOD. The LA-City LAMC concepts — q_conditions_la,
+# methane_hazard_zone_la, transitional_height_adj_zones — are N/A here (no
+# readers), and historic_status stays manual (no County REST layer). land_sf/apn
+# already resolve via the LA County Assessor layer in parcel.py / jurisdiction.py.
+LACOUNTY_READERS = {
+    "zoning": lacounty.zoning,
+    "specific_plan_overlay": lacounty.specific_plan_overlay,
+    "council_supervisor_district": lacounty.supervisor_district,
+    "toc_tier_la": lacounty.tod,                       # County TOD in the TOC/Tier cell
+    "half_mile_major_transit": lacounty.half_mile_major_transit,
+    "tier_transit_verification": lacounty.tier_transit_verification,
 }
 
 
@@ -184,11 +201,15 @@ def collect(wb_path, address, property_id=None, workers=10):
     if zimas.in_la_city(geo):       # also warms the parcel snap the ZIMAS readers share
         active.update(ZIMAS_READERS)
         print("primary parcel is in LA City -> running ZIMAS block\n")
+    elif _county_basename(geo) == "Los Angeles" and lacounty.is_unincorporated(geo):
+        active.update(LACOUNTY_READERS)
+        print("primary parcel is in unincorporated LA County -> running LA County (DRP) block\n")
     elif _county_basename(geo) == "San Diego":
         active.update(SD_READERS)
         print("primary parcel is in San Diego -> running SD block\n")
     else:
-        print("primary parcel not in LA City / San Diego -> municipal block skipped (route to local planning)\n")
+        print("primary parcel not in LA City / unincorporated LA County / San Diego -> "
+              "municipal block skipped (route to local planning)\n")
     for _warm in (nc._load, tcac._load_index):   # warm the shared bulk caches once (thread-safe)
         try:
             _warm()

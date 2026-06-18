@@ -114,6 +114,21 @@ def in_la_city(geo) -> bool:
     place = (geo.get("place") or "").strip().lower()
     if place and place != "los angeles":
         return False
+    # Authoritative test: the LA County City-Boundaries polygon (which carries the
+    # incorporated city limits and unincorporated areas). A geocoded point in an
+    # unincorporated pocket can land ~100 m from an LA-City parcel across the street,
+    # so the parcel-snap below alone misroutes it into ZIMAS and reports the
+    # neighbor's City zoning. The boundary polygon is address-independent and is the
+    # correct LA-City-vs-County/other-city discriminator.
+    try:
+        import lacounty
+        name = lacounty.la_city_name(geo)
+        if name is not None:
+            return name == "Los Angeles"
+    except Exception:
+        pass
+    # Fallback (outside LA County boundary coverage, or that layer is down): the
+    # original parcel-snap test — a parcel must exist near the point to be LA City.
     try:
         _snapped(geo)
         return True

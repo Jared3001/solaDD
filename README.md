@@ -12,7 +12,8 @@ build/       validate.py (drift guard) · generate.py (build master from schema)
              assemblage.py (multi-APN block: combined land area + aggregated designations)
 build/sources/  geocoder.py (keystone) + Tier-A readers: fema · hud · tcac · oz ·
              calfire · calgem · cgs · ust · zimas (LA-City block via NavigateLA REST) ·
-             jurisdiction (county, geographic_pool, address, apn, city_jurisdiction) · parcel (land_sf) ·
+             lacounty (unincorporated-LA-County block via DRP Open_Data REST) ·
+             sandiego (City-of-SD block) · jurisdiction (county, geographic_pool, address, apn, city_jurisdiction) · parcel (land_sf) ·
              nc (neighborhood change) · pha (housing authority) · places (nearest_* via OSM) ·
              slope (USGS 3DEP) · towers (cell) · airport (ALUC) · coastal (CCC) · streetview (key-ready aid)
              (each → {answer,notes}; _arcgis.py shared query helper)
