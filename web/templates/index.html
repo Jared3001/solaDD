@@ -124,7 +124,8 @@
     <section id="sources-panel" class="panel hidden">
       <h2 class="recent-head">Where each answer comes from</h2>
       <p class="hint">Every automated field is sourced at one of three levels. Federal and statewide sources are
-        identical anywhere in California; local sources vary by jurisdiction.</p>
+        identical anywhere in California; local sources vary by jurisdiction. <strong>Want to check a value yourself?</strong>
+        Each source links straight to its live public tracker — open it, punch in the same address or APN, and compare.</p>
 
       {% for tier in sources.tiers %}
       <div class="src-tier">
@@ -133,13 +134,14 @@
           <span class="src-tier-blurb">{{ tier.blurb }}</span>
         </div>
         <table class="src-table">
-          <thead><tr><th>Source</th><th>Dataset</th><th>Answers</th></tr></thead>
+          <thead><tr><th>Source</th><th>Dataset</th><th>Answers</th><th>Verify</th></tr></thead>
           <tbody>
             {% for g in tier.groups %}
             <tr>
               <td class="src-name">{{ g.source }}</td>
               <td class="src-detail">{{ g.detail }}</td>
               <td>{{ g.fields | join(", ") }}</td>
+              <td>{% if g.tracker %}<a class="src-link" href="{{ g.tracker }}" target="_blank" rel="noopener">Live tracker ↗</a>{% endif %}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -165,6 +167,14 @@
             {% endfor %}
           </tbody>
         </table>
+        {% if sources.local.trackers %}
+        <div class="src-trackers">
+          <span class="src-trackers-label">Live jurisdiction trackers:</span>
+          {% for t in sources.local.trackers %}
+          <a class="src-chip" href="{{ t.url }}" target="_blank" rel="noopener">{{ t.label }} ↗</a>
+          {% endfor %}
+        </div>
+        {% endif %}
       </div>
     </section>
   </main>

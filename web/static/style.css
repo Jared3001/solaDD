@@ -286,7 +286,22 @@ h1, .brand-mark, .tab, .run-btn, label, th, .phase, .kicker {
 .src-table td { padding: 8px 10px; border-bottom: 1px solid #efe9dd; font-size: 14px; vertical-align: top; }
 .src-name { font-weight: 600; color: var(--navy); white-space: nowrap; }
 .src-detail { color: var(--gray); font-size: 13px; }
-.src-local td { width: 33%; }
+.src-local td { width: 25%; }
 .src-na { color: var(--na); font-style: italic; }
+
+.src-link {
+  font-weight: 600; font-size: 13px; color: var(--mid); text-decoration: none; white-space: nowrap;
+}
+.src-link:hover { color: var(--navy); text-decoration: underline; }
+
+.src-trackers { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.src-trackers-label {
+  font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--gray); margin-right: 2px;
+}
+.src-chip {
+  display: inline-block; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line);
+  background: #fff; color: var(--mid); font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap;
+}
+.src-chip:hover { border-color: var(--mid); background: #f4f7fb; color: var(--navy); }
 
 .hidden { display: none !important; }
