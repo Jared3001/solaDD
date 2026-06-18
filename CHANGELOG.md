@@ -29,6 +29,18 @@ set of metrics than LA City. Two changes:
   to the County block, returns `SP — Florence-Firestone` zoning, Florence-Firestone TOD
   (Metro Blue Line), Supervisorial District 2, APN 6008-034-001…004, 18,299 sf summed.
   Regression-checked routing: LA City → ZIMAS, Santa Monica → manual, San Diego → SD.
+- **APN-list assemblage path (`assemblage.py`) fixed too.** It decided jurisdiction by
+  *which parcel layer resolved the APN*, and the LA City Landbase layer also carries
+  unincorporated-County parcels — so the 7-APN Slauson block (6008-034-001…007) was
+  tagged LA, ran ZIMAS, and produced `Zoning = TOOL-FAIL` plus wrong `Council District
+  OUTLA` / `TOC Tier 3`. `parcel_info()` now confirms jurisdiction against the
+  City-Boundaries polygon (`LA` / `LACOUNTY` / `SD`), adds a `_parcel_info_lacounty()`
+  resolver (LA County Assessor by AIN, EPSG:2229 — authoritative County geometry,
+  matching the per-address path), and routes `LACOUNTY_READERS` in `_run_all_parcels` /
+  the `assess` field union. Re-run of the 7-APN block now returns `SP — Florence-Firestone`
+  zoning, Supervisorial District 2, Florence-Firestone TOD, 36,862 sf (VERIFIED).
+  Also fixed `lacounty.half_mile_major_transit` to answer `Yes`/`No` (was "Likely Yes",
+  which the yes/no site-level aggregator misread as No).
 
 ## v0.17-draft (2026-06-17) — completed checklists: persistent + one-click to model
 Builds on the Financial model tab (v0.16):

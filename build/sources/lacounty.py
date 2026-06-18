@@ -209,13 +209,13 @@ def half_mile_major_transit(geo) -> dict:
     feats = ag.query(DRP, L_TOD, lon=geo["lon"], lat=geo["lat"], out_fields="NAME,LINE", distance=_BUF)
     if feats:
         a = feats[0]["attributes"]
-        return {"answer": "Likely Yes (within a TOD)", "state": "JUDGMENT",
+        return {"answer": "Yes (derived — within a TOD)", "state": "JUDGMENT",
                 "notes": f"Parcel is inside the County '{a.get('NAME')}' Transit Oriented District"
                          + (f" (Metro {a.get('LINE')} Line)" if a.get("LINE") else "")
                          + ", which is organized around a major transit stop — so it is very likely within "
                            "½ mile of major transit. DERIVED from TOD membership; confirm the exact ½-mile "
                            "distance to the station. Source: LA County DRP TOD (Open_Data L23)."}
-    return {"answer": "Not indicated", "state": "JUDGMENT",
+    return {"answer": "No (not in a County TOD — verify distance)", "state": "JUDGMENT",
             "notes": "Parcel is not in a County TOD; no County ½-mile-from-major-transit layer is published. "
                      "Measure distance to the nearest major transit stop to confirm. "
                      "Source: LA County DRP (no TOD at point)."}

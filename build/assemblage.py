@@ -41,12 +41,15 @@ from runner import run_reader
 # SD_READERS is being added to collect.py concurrently by another agent; import it
 # defensively so this tool doesn't crash if it isn't present yet.
 try:
-    from collect import READERS, ZIMAS_READERS, SD_READERS
+    from collect import READERS, ZIMAS_READERS, SD_READERS, LACOUNTY_READERS
 except ImportError:
     from collect import READERS, ZIMAS_READERS
     SD_READERS = {}
-import zimas, nc
+    LACOUNTY_READERS = {}
+import zimas, nc, lacounty
 import sd_parcel
+import parcel as _parcel
+from jurisdiction import _county_basename
 
 LACITY_PARCELS = "https://maps.lacity.org/lahub/rest/services/Landbase_Information/MapServer"
 PARCEL_LAYER = 5   # "Parcels" — geometry area in EPSG:2229 reproduces ZIMAS lot area
@@ -121,17 +124,65 @@ def _parcel_info_sd(apn: str) -> dict:
             "place": geo.get("place"), "matched_address": geo["matched_address"]}
 
 
+def _parcel_info_lacounty(apn: str) -> dict:
+    """Resolve an APN against the LA County Assessor parcel layer (AIN, EPSG:2229) —
+    the authoritative source for unincorporated parcels, matching the per-address
+    path's geometry. Returns the parcel dict with jurisdiction='LACOUNTY' or raises
+    LookupError if the AIN isn't there."""
+    ain = _norm(apn)
+    feet = ag.query(_parcel.LACOUNTY, 0, where=f"AIN='{ain}'", return_geometry=True,
+                    out_sr=2229, out_fields="AIN")
+    lots = [f for f in feet if f.get("geometry")]
+    if not lots:
+        raise LookupError(f"no LA County parcel for AIN {ain}")
+    land_sf = sum(ag.ring_area(f["geometry"]["rings"]) for f in lots)
+    wgs = ag.query(_parcel.LACOUNTY, 0, where=f"AIN='{ain}'", return_geometry=True,
+                   out_sr=4326, out_fields="AIN")
+    best_pt, best_a = None, -1
+    for f in wgs:
+        rings = (f.get("geometry") or {}).get("rings") or []
+        if not rings:
+            continue
+        pts = rings[0]
+        if len(pts) > best_a:
+            best_a, best_pt = len(pts), (sum(p[0] for p in pts) / len(pts),
+                                         sum(p[1] for p in pts) / len(pts))
+    if not best_pt:
+        raise LookupError(f"LA County parcel {ain} has no usable geometry centroid")
+    lon, lat = best_pt
+    geo = geocode_point(lon, lat)
+    return {"apn": apn, "jurisdiction": "LACOUNTY", "bpp": ain, "n_lots": len(lots),
+            "land_sf": round(land_sf, 1), "lon": lon, "lat": lat, "geoid": geo["geoid"],
+            "state_fips": geo["state_fips"], "county_fips": geo["county_fips"],
+            "place": geo.get("place"), "matched_address": geo["matched_address"]}
+
+
 def parcel_info(apn: str) -> dict:
     """Resolve an APN to a parcel dict, auto-detecting jurisdiction.
 
     LA-City and San Diego APNs are both 10 digits (just different dash grouping:
-    '5082-024-018' vs '453-122-10-00'), so length can't disambiguate them. Instead
-    we detect by which parcel layer actually resolves the APN: try LA City Parcels
-    (BPP) first, and if that returns nothing, try SANDAG. The result carries a
-    'jurisdiction' marker ('LA'/'SD') so the reader aggregation can pick the right
-    municipal block (ZIMAS for LA, SD_READERS for San Diego)."""
+    '5082-024-018' vs '453-122-10-00'), so length can't disambiguate them. We resolve
+    geometry by which layer carries the APN, but the JURISDICTION (which municipal
+    block runs) is decided by the authoritative City-Boundaries polygon — the LA City
+    Landbase layer also carries some unincorporated-County parcels, so resolving there
+    does NOT make a parcel LA City. The result carries a 'jurisdiction' marker
+    ('LA' / 'LACOUNTY' / 'SD') so the aggregation picks ZIMAS, the County DRP block,
+    or the SD block."""
     try:
-        return _parcel_info_la(apn)
+        info = _parcel_info_la(apn)
+        geo = _parcel_geo(info)
+        # The Landbase layer carries some County parcels — confirm against the boundary.
+        if (not zimas.in_la_city(geo) and _county_basename(geo) == "Los Angeles"
+                and lacounty.is_unincorporated(geo)):
+            try:
+                return _parcel_info_lacounty(apn)   # authoritative County geometry + marker
+            except LookupError:
+                info["jurisdiction"] = "LACOUNTY"    # keep Landbase area, still route County readers
+        return info
+    except LookupError:
+        pass
+    try:
+        return _parcel_info_lacounty(apn)            # unincorporated parcel not in the LA City layer
     except LookupError:
         pass
     try:
@@ -139,7 +190,7 @@ def parcel_info(apn: str) -> dict:
     except LookupError:
         pass
     raise LookupError(
-        f"APN {apn} not found in LA City Parcels or SANDAG County Parcels")
+        f"APN {apn} not found in LA City Parcels, LA County Assessor, or SANDAG County Parcels")
 
 
 def _parcel_geo(parcel):
@@ -161,6 +212,7 @@ def _run_all_parcels(parcels, workers=12):
     base = {k: v for k, v in READERS.items() if k not in _SITE_LEVEL}
     muni = {
         "LA": {k: v for k, v in ZIMAS_READERS.items() if k not in _SITE_LEVEL},
+        "LACOUNTY": {k: v for k, v in LACOUNTY_READERS.items() if k not in _SITE_LEVEL},
         "SD": {k: v for k, v in SD_READERS.items() if k not in _SITE_LEVEL},
     }
     try:
@@ -289,10 +341,13 @@ def assess(wb_path, apns, property_id=None):
     # Union of every reader that could have run across the assemblage's parcels:
     # statewide + whichever municipal blocks are present (ZIMAS for LA, SD for SD).
     have_la = any(p.get("jurisdiction") == "LA" for p in parcels)
+    have_lacounty = any(p.get("jurisdiction") == "LACOUNTY" for p in parcels)
     have_sd = any(p.get("jurisdiction") == "SD" for p in parcels)
     fids = list(READERS)
     if have_la:
         fids += list(ZIMAS_READERS)
+    if have_lacounty:
+        fids += list(LACOUNTY_READERS)
     if have_sd:
         fids += list(SD_READERS)
     seen = set()
