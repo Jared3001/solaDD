@@ -252,6 +252,13 @@ h1, .brand-mark, .tab, .run-btn, label, th, .phase, .kicker {
   font-weight: 700; font-size: 13px;
 }
 .rc-dl:hover { background: #cf9128; }
+.rc-actions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; white-space: nowrap; }
+.rc-gen {
+  background: transparent; color: var(--navy); border: 1px solid var(--line);
+  padding: 5px 12px; border-radius: 5px; font-family: "Archivo", sans-serif;
+  font-weight: 700; font-size: 13px; cursor: pointer;
+}
+.rc-gen:hover { background: #f3ede1; }
 
 .error-banner {
   background: #f7e3e1; color: #7a241f; border: 1px solid #e3b3ad;

@@ -53,7 +53,7 @@
 
           <label for="om" class="om-label">Offering Memorandum <span class="om-opt">(optional PDF)</span></label>
           <input type="file" id="om" name="om" accept="application/pdf,.pdf">
-          <p class="hint">Drop the OM to auto-fill deal facts (price, land size, unit/tenant mix…). Claude reads the PDF; values default to the OM and switch to a DD answer only when our process finds a different, cited value. Leave the address blank to pull it from the OM.</p>
+          <p class="hint">Drop the OM to auto-fill deal facts (price, land size, unit/tenant mix…). Gemini reads the PDF; values default to the OM and switch to a DD answer only when our process finds a different, cited value. Leave the address blank to pull it from the OM.</p>
         </div>
 
         <div class="field hidden" data-for="assemblage">
@@ -112,8 +112,8 @@
       <section id="results" class="results"></section>
 
       <section id="recent-panel" class="panel hidden">
-        <h2 class="recent-head">Recent runs</h2>
-        <p class="hint">Re-download a completed checklist without re-running. Cleared on redeploy.</p>
+        <h2 class="recent-head">Completed checklists</h2>
+        <p class="hint">Re-download a finished checklist, or click <strong>→ Financial model</strong> to build the Stick + Modular pro-forma straight from it. Persists across redeploys.</p>
         <table class="recent-table">
           <thead><tr><th>Site</th><th>Type</th><th>Fields</th><th>When</th><th></th></tr></thead>
           <tbody id="recent-body"></tbody>

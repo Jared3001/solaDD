@@ -55,12 +55,14 @@ DATA_DIR = Path(os.environ.get("DATA_DIR") or (Path(tempfile.gettempdir()) / "so
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 RUN_DIR = DATA_DIR
 COUNTER_FILE = DATA_DIR / "counter.json"
+INDEX_FILE = DATA_DIR / "jobs_index.json"   # compact recent-runs index — survives redeploys (files already persist in DATA_DIR)
 
 # Time-saved metric. STARTING_CHECKLISTS = sites already automated before the
 # app started counting; each automated checklist saves MINUTES_PER_CHECKLIST.
 STARTING_CHECKLISTS = int(os.environ.get("STARTING_CHECKLISTS", "9"))
 MINUTES_PER_CHECKLIST = int(os.environ.get("MINUTES_PER_CHECKLIST", "30"))
 _counter_lock = threading.Lock()
+_index_lock = threading.Lock()
 
 # Schema metadata for labelling / grouping results in the UI.
 _schema = yaml.safe_load((ROOT / "canonical" / "schema.yaml").read_text())
@@ -294,7 +296,7 @@ def run_single(job):
     # OM (optional) — extract deal facts first; an uploaded OM can also supply the address.
     om_fields = []
     if job["input"].get("om_bytes"):
-        job["phase"] = "Reading the Offering Memorandum with Claude…"
+        job["phase"] = "Reading the Offering Memorandum with Gemini…"
         try:
             import om_extract
             om_fields = om_extract.extract(job["input"]["om_bytes"],
@@ -526,23 +528,81 @@ def stats():
     }
 
 
-def recent_jobs(n=10):
-    """Most recent completed runs, newest first, for the re-download list."""
+def _job_counts(j):
+    """(field count, flag count) — from the live fields dict, else persisted stub counts."""
+    with j["_lock"]:
+        states = [f["state"] for f in j["fields"].values()]
+    if states:
+        flags = sum(1 for s in states if s.startswith("TOOL-FAIL") or s == "MANUAL-VERIFY")
+        return len(states), flags
+    return j.get("_n_fields", 0), j.get("_n_flags", 0)
+
+
+def _downloadable(j):
+    return bool(j.get("file")) and os.path.exists(j["file"])
+
+
+def recent_jobs(n=12):
+    """Most recent completed runs, newest first — re-download + 'generate model' list."""
     with _lock:
-        done = [j for j in _jobs.values() if j["status"] == "done"]
+        done = [j for j in _jobs.values() if j.get("status") == "done"]
     done.sort(key=lambda j: j.get("finished") or "", reverse=True)
     out = []
     for j in done[:n]:
-        with j["_lock"]:
-            states = [f["state"] for f in j["fields"].values()]
-        flags = sum(1 for s in states
-                    if s.startswith("TOOL-FAIL") or s == "MANUAL-VERIFY")
+        nfields, nflags = _job_counts(j)
         out.append({
             "id": j["id"], "kind": j["kind"], "label": j.get("label") or j["id"],
-            "finished": j.get("finished"), "fields": len(states), "flags": flags,
-            "downloadable": bool(j.get("file")),
+            "finished": j.get("finished"), "fields": nfields, "flags": nflags,
+            "downloadable": _downloadable(j),
+            # a DD checklist (not a model) with a file on disk can seed a financial model
+            "can_model": j["kind"] in ("single", "assemblage") and _downloadable(j),
         })
     return out
+
+
+def _persist_index():
+    """Write a compact index of completed jobs to the volume, so the Recent list,
+    downloads, and 'generate model' all survive a redeploy (the workbooks themselves
+    already persist in DATA_DIR). Best-effort — never raises into a job."""
+    with _lock:
+        done = [j for j in _jobs.values() if j.get("status") == "done" and _downloadable(j)]
+    done.sort(key=lambda j: j.get("finished") or "", reverse=True)
+    recs = []
+    for j in done[:MAX_JOBS]:
+        nfields, nflags = _job_counts(j)
+        recs.append({"id": j["id"], "kind": j["kind"], "label": j.get("label") or j["id"],
+                     "finished": j.get("finished"), "file": j.get("file"),
+                     "filename": j.get("filename"), "n_fields": nfields, "n_flags": nflags,
+                     "underwrite": bool(j.get("underwrite"))})
+    with _index_lock:
+        try:
+            INDEX_FILE.write_text(json.dumps(recs))
+        except Exception:
+            traceback.print_exc()
+
+
+def _load_index():
+    """Rehydrate completed-job stubs from the volume index at startup (in-memory _jobs
+    is otherwise empty after a redeploy). Stubs carry enough to list, download, and seed
+    a model; their live field detail is gone, so counts come from the persisted index."""
+    try:
+        recs = json.loads(INDEX_FILE.read_text())
+    except Exception:
+        return
+    for r in recs:
+        if r.get("id") in _jobs or not r.get("file"):
+            continue
+        _jobs[r["id"]] = {
+            "id": r["id"], "kind": r.get("kind", "single"), "status": "done",
+            "label": r.get("label"), "file": r.get("file"), "filename": r.get("filename"),
+            "finished": r.get("finished"), "started": r.get("finished"),
+            "fields": {}, "_n_fields": r.get("n_fields", 0), "_n_flags": r.get("n_flags", 0),
+            "underwrite": {"models": []} if r.get("underwrite") else None,
+            "geo": None, "in_la_city": None, "phase": "Complete",
+            "total": r.get("n_fields", 0), "completed": r.get("n_fields", 0),
+            "parcels": None, "combined_sf": None, "om": None, "error": None,
+            "input": {}, "_lock": threading.Lock(), "_rehydrated": True,
+        }
 
 
 def _prune():
@@ -593,6 +653,8 @@ def _run(job):
         job["phase"] = "Error"
     finally:
         job["finished"] = _now()
+        if job["status"] == "done":
+            _persist_index()           # keep the volume index in sync with completed runs
 
 
 def get_job(jid):
@@ -610,6 +672,11 @@ def public_view(job):
         "fields": fields,
         "parcels": job["parcels"], "combined_sf": job["combined_sf"],
         "om": job.get("om"), "underwrite": job.get("underwrite"),
-        "error": job["error"], "downloadable": bool(job["file"]),
+        "error": job["error"], "downloadable": _downloadable(job),
         "started": job["started"], "finished": job["finished"],
     }
+
+
+# Rehydrate prior completed runs from the volume so they're available immediately
+# (the Recent list + 'generate model' work right after a redeploy, not just after a run).
+_load_index()

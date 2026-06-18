@@ -84,9 +84,20 @@ async function launch(fetchOpts) {
 // "Generate financial model" from the just-completed DD run (no re-upload).
 $("#gen-model").addEventListener("click", () => {
   if (!lastDDJob) return;
-  launch({ method: "POST", headers: { "Content-Type": "application/json" },
-           body: JSON.stringify({ mode: "underwrite", from_job: lastDDJob }) });
+  genModelFrom(lastDDJob);
 });
+
+// "→ Financial model" next to any previously completed checklist in Recent runs.
+$("#recent-body").addEventListener("click", (e) => {
+  const btn = e.target.closest(".rc-gen");
+  if (btn && btn.dataset.job) genModelFrom(btn.dataset.job);
+});
+
+function genModelFrom(jobId) {
+  launch({ method: "POST", headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ mode: "underwrite", from_job: jobId }) });
+  $("#status-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+}
 
 // ---------- polling ----------
 function poll(jobId) {
@@ -304,7 +315,10 @@ async function loadRecent() {
         <td>${run.kind === "assemblage" ? "Assemblage" : run.kind === "underwrite" ? "Model" : "Single"}</td>
         <td>${run.fields}${run.flags ? ` <span class="rc-flag" title="${run.flags} field(s) need manual verification">⚑ ${run.flags}</span>` : ""}</td>
         <td class="rc-when">${esc((run.finished || "").replace("T", " "))}</td>
-        <td>${run.downloadable ? `<a class="rc-dl" href="/api/download/${run.id}">Download</a>` : ""}</td>
+        <td class="rc-actions">
+          ${run.can_model ? `<button class="rc-gen" type="button" data-job="${esc(run.id)}" title="Build Stick + Modular pro-forma from this checklist">→ Financial model</button>` : ""}
+          ${run.downloadable ? `<a class="rc-dl" href="/api/download/${run.id}">Download</a>` : ""}
+        </td>
       </tr>`).join("");
   } catch (_) { /* ignore */ }
 }

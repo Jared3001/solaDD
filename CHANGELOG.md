@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.17-draft (2026-06-17) — completed checklists: persistent + one-click to model
+Builds on the Financial model tab (v0.16):
+- The recent panel ("Completed checklists") is shown up front, and each DD-checklist
+  row now has a **"→ Financial model"** button that builds the Stick + Modular
+  pro-forma straight from that checklist (chains via `from_job` — no re-upload).
+  Model runs don't get the button (`recent_jobs.can_model` = kind single/assemblage
+  with a file on disk).
+- **The list now survives redeploys.** `web/jobs.py` persists a compact index
+  (`DATA_DIR/jobs_index.json`) on each completed run and rehydrates stubs at startup,
+  so the list + downloads + "generate model" work immediately after a deploy (the
+  workbooks already persisted on the volume; only the in-memory metadata was lost on
+  restart). `recent_jobs` uses live field counts or the persisted stub counts;
+  `downloadable` now checks the file still exists.
+- Verified via the Flask test client (persist → simulated redeploy → rehydrate →
+  model from the rehydrated checklist; `/api/recent` exposes `can_model`) and a live
+  gunicorn preview (seeded index rehydrated on page load; the row button drove
+  `POST /api/run` `from_job` → underwrite → done, both models).
+
 ## v0.16-draft (2026-06-17) — "Financial model" tab on the web app
 The underwriting exporter (`build/underwrite.py`, DD checklist → Stick + Modular
 pro-forma) is now wired into the web front end as a new **Financial model** tab.
