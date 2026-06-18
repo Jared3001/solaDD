@@ -406,6 +406,7 @@ body { flex-direction: column; }
                         <button class="sensi-tab active" data-sensi="returns" onclick="switchSensi('returns')">Returns</button>
                         <button class="sensi-tab" data-sensi="revenue" onclick="switchSensi('revenue')">Cost × Rent</button>
                         <button class="sensi-tab" data-sensi="finance" onclick="switchSensi('finance')">Financing</button>
+                        <button class="sensi-tab" data-sensi="land" onclick="switchSensi('land')">Land × Cap</button>
                     </div>
                 </div>
                 <div class="sensi-container" id="sensi-container">
@@ -1587,6 +1588,25 @@ function buildSensiEngine() {
                 html += '</tr>';
             });
             html += '</tbody></table>';
+        } else if (activeSensi === 'land') {
+            const capSteps = [-0.0075, -0.0025, 0, 0.0025, 0.0075];
+            const landSteps = [-50000, -25000, 0, 25000, 50000];   // $/unit around current
+            const basePU = (model.landCost || 0) / (model.units || 1);
+            html = '<table class="sensi-table"><thead><tr><th class="corner">Levered IRR<br>Land/unit × Exit Cap</th>';
+            capSteps.forEach(c => html += `<th>Cap ${fPct(model.capRate + c)}</th>`);
+            html += '</tr></thead><tbody>';
+            landSteps.forEach(ls => {
+                const lpu = Math.max(0, basePU + ls);
+                setCell('(Z+) Dev Budget', 'G7', lpu * (model.units || 0));
+                html += `<tr><td class="y-axis">$${Math.round(lpu / 1000)}K/u</td>`;
+                capSteps.forEach(c => {
+                    setCell('Dashboard', 'J5', model.capRate + c);
+                    const irr = leveredIRR();
+                    html += `<td class="${ls === 0 && c === 0 ? 'target' : ''}">${irr == null ? '—' : fPct(irr, 1)}</td>`;
+                });
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
         }
         container.innerHTML = html;
     } catch (e) { console.warn('sensi engine failed, JS fallback:', e && e.message); buildSensiTableJS(); }
@@ -2591,7 +2611,10 @@ async function downloadProforma() {
     // Install the one sensitivity data table the template ships un-installed,
     // then force Excel to recalc every formula on open (validated Engine steps).
     let __s2 = await zip.file('xl/worksheets/sheet2.xml').async('string');
-    __s2 = installDataTable(__s2, 'C29', 'C29:G33', 'W18', 'W19');
+    // Onsite sensitivity table is vestigial (construction folded into the modular
+    // price book) — blank it instead of installing a misleading what-if.
+    for (let __r = 29; __r <= 33; __r++) for (const __c of ['C','D','E','F','G']) __s2 = patchCell(__s2, __c + __r, '', true);
+    __s2 = patchCell(__s2, 'E27', 'On-site (folded into modular cost)', true);
     zip.file('xl/worksheets/sheet2.xml', __s2);
     let __wb = await zip.file('xl/workbook.xml').async('string');
     if (!/fullCalcOnLoad/.test(__wb)) {

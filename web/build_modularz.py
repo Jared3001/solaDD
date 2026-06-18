@@ -723,6 +723,56 @@ function loadDeal(m, units) {'''
         sys.exit("loadDeal land-basis message anchor not found uniquely")
     html = html.replace(old_landline, new_landline, 1)
 
+    # ---- 9. LIVE "Land x Cap" sensitivity + tidy the dead Excel onsite table ---
+    # 9a. Add the tab (purchase price is the negotiation lever, so make it a grid).
+    old_tab = '<button class="sensi-tab" data-sensi="finance" onclick="switchSensi(\'finance\')">Financing</button>'
+    new_tab = (old_tab +
+               '\n                        <button class="sensi-tab" data-sensi="land" onclick="switchSensi(\'land\')">Land × Cap</button>')
+    if html.count(old_tab) != 1:
+        sys.exit("sensi-tab finance button anchor not found uniquely")
+    html = html.replace(old_tab, new_tab, 1)
+
+    # 9b. Engine branch: Levered IRR over Land $/unit (vary Dev Budget!G7) x Exit
+    #     Cap (vary Dashboard!J5). The in-browser engine varies cells across sheets
+    #     freely (no Excel data-table same-sheet limit), so land works here.
+    land_branch = '''            html += '</tbody></table>';
+        } else if (activeSensi === 'land') {
+            const capSteps = [-0.0075, -0.0025, 0, 0.0025, 0.0075];
+            const landSteps = [-50000, -25000, 0, 25000, 50000];   // $/unit around current
+            const basePU = (model.landCost || 0) / (model.units || 1);
+            html = '<table class="sensi-table"><thead><tr><th class="corner">Levered IRR<br>Land/unit × Exit Cap</th>';
+            capSteps.forEach(c => html += `<th>Cap ${fPct(model.capRate + c)}</th>`);
+            html += '</tr></thead><tbody>';
+            landSteps.forEach(ls => {
+                const lpu = Math.max(0, basePU + ls);
+                setCell('(Z+) Dev Budget', 'G7', lpu * (model.units || 0));
+                html += `<tr><td class="y-axis">$${Math.round(lpu / 1000)}K/u</td>`;
+                capSteps.forEach(c => {
+                    setCell('Dashboard', 'J5', model.capRate + c);
+                    const irr = leveredIRR();
+                    html += `<td class="${ls === 0 && c === 0 ? 'target' : ''}">${irr == null ? '—' : fPct(irr, 1)}</td>`;
+                });
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+        }
+        container.innerHTML = html;'''
+    old_engine_end = "            html += '</tbody></table>';\n        }\n        container.innerHTML = html;"
+    if html.count(old_engine_end) != 1:
+        sys.exit("buildSensiEngine finance-branch end anchor not found uniquely")
+    html = html.replace(old_engine_end, land_branch, 1)
+
+    # 9c. Tidy the download: don't install the vestigial onsite data table
+    #     (construction is folded into the modular price book); blank its body.
+    old_install = "    __s2 = installDataTable(__s2, 'C29', 'C29:G33', 'W18', 'W19');"
+    new_install = ("    // Onsite sensitivity table is vestigial (construction folded into the modular\n"
+                   "    // price book) — blank it instead of installing a misleading what-if.\n"
+                   "    for (let __r = 29; __r <= 33; __r++) for (const __c of ['C','D','E','F','G']) __s2 = patchCell(__s2, __c + __r, '', true);\n"
+                   "    __s2 = patchCell(__s2, 'E27', 'On-site (folded into modular cost)', true);")
+    if html.count(old_install) != 1:
+        sys.exit("onsite installDataTable anchor not found uniquely")
+    html = html.replace(old_install, new_install, 1)
+
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:
         f.write(html)
