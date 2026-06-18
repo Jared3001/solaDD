@@ -523,6 +523,21 @@ function buildSensiTableJS() {'''
         sys.exit("IRR clamp anchor (grid) not found uniquely")
     html = html.replace(old_grid_irr, new_grid_irr, 1)
 
+    # ---- 6d. Stabilized NOI tile: auto-scale to $M when >= $1M (was always "K",
+    #     so $1.66M rendered as "$1664K"). Small (affordable) NOIs stay in "K".
+    helper_anchor = "const fPct = (v, d = 2) =>"
+    helper_def = ("const fMoneyMK = v => (v != null && Math.abs(v) >= 1e6) ? fMoneyM(v) : fMoneyK(v);\n"
+                  "const fPct = (v, d = 2) =>")
+    if html.count(helper_anchor) != 1:
+        sys.exit("fMoneyMK helper anchor not found uniquely")
+    html = html.replace(helper_anchor, helper_def, 1)
+
+    for old_noi, label in [("noi: fMoneyK(res.noi),", "updateUI"),
+                           ("set('noi', fMoneyK(k.noi));", "applyEngineKPIs")]:
+        if html.count(old_noi) != 1:
+            sys.exit(f"NOI formatter anchor ({label}) not found uniquely")
+        html = html.replace(old_noi, old_noi.replace("fMoneyK", "fMoneyMK"), 1)
+
     # ---- 7. AFFORDABILITY (CTCAC AMI rents) preview — Workstreams B/C/E ------
     # 7a. Load the generated data layers (rents + ZIP->county crosswalk) before
     #     the main script. Served from Flask's /static.

@@ -890,6 +890,7 @@ const TIER_DEFAULTS = {
 const fMoney = v => v == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v);
 const fMoneyM = v => v == null ? '—' : '$' + (v / 1e6).toFixed(1) + 'M';
 const fMoneyK = v => v == null ? '—' : '$' + (v / 1e3).toFixed(0) + 'K';
+const fMoneyMK = v => (v != null && Math.abs(v) >= 1e6) ? fMoneyM(v) : fMoneyK(v);
 const fPct = (v, d = 2) => v == null || !isFinite(v) ? '—' : (v * 100).toFixed(d) + '%';
 const fNum = (v, d = 2) => v == null ? '—' : new Intl.NumberFormat('en-US', { maximumFractionDigits: d }).format(v);
 const fBp = v => (v >= 0 ? '+' : '') + Math.round(v * 10000) + 'bp';
@@ -1425,7 +1426,7 @@ function updateUI(opts = {}) {
         spread: fBp(res.spread),
         tdc: fMoneyM(res.tdc),
         ppu: fMoneyK(res.ppu),
-        noi: fMoneyK(res.noi),
+        noi: fMoneyMK(res.noi),
         dscr: fNum(res.dscr, 2) + 'x',
         equity: fMoneyM(res.equity)
     };
@@ -2502,7 +2503,7 @@ function applyEngineKPIs() {
     if (k.spread != null) set('spread', fBp(k.spread));
     if (k.tdc != null)    set('tdc', fMoneyM(k.tdc));
     if (k.ppu != null)    set('ppu', fMoneyK(k.ppu));
-    if (k.noi != null)    set('noi', fMoneyK(k.noi));
+    if (k.noi != null)    set('noi', fMoneyMK(k.noi));
     if (k.dscr != null)   set('dscr', fNum(k.dscr, 2) + 'x');
     if (k.equity != null) set('equity', fMoneyM(k.equity));
 }
