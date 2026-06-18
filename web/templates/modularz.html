@@ -227,6 +227,21 @@ body { flex-direction: column; }
 .sensi-note { font-size: 10.5px; color: var(--text-muted); margin-top: 8px; font-style: italic; }
 #affordability-panel select { font-family: var(--font-sans); font-size: 11.5px; border: 1px solid var(--border-strong); border-radius: 4px; padding: 2px 5px; background: var(--bg-subtle); color: var(--text-main); }
 #affordability-panel .detail-list input { width: 88px; }
+
+/* ============== LAND PRICE — max-price display + combined lever (injected) ============== */
+.maxland-box { display: flex; flex-direction: column; gap: 1px; background: linear-gradient(180deg, rgba(224,162,55,0.13), rgba(224,162,55,0.03)); border: 1px solid var(--accent); border-radius: 6px; padding: 7px 10px; margin-bottom: 12px; }
+.maxland-label { font-size: 10px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--text-muted); }
+.maxland-sub { font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-faint); }
+.maxland-figs { display: flex; align-items: baseline; gap: 8px; }
+.maxland-val { font-family: var(--font-mono); font-size: 18px; font-weight: 700; line-height: 1.1; color: var(--accent); }
+.maxland-pu { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.lever-land { padding-bottom: 11px; margin-bottom: 11px; border-bottom: 1px solid var(--border); }
+.land-dollar-row { display: flex; align-items: center; gap: 5px; margin-bottom: 6px; }
+.land-dollar-prefix { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+.land-dollar-row input { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 12px; border: 1px solid var(--border-strong); border-radius: 4px; padding: 3px 6px; background: var(--bg-subtle); color: var(--text-main); }
+.land-dollar-row input:focus { outline: none; border-color: var(--accent); }
+.land-pu { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); white-space: nowrap; }
+.lever-land .lever-range .land-mark { color: var(--accent); }
 </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <!-- Formula engine: runs the proforma's own formulas in-browser so the dashboard
@@ -367,6 +382,20 @@ body { flex-direction: column; }
 
             <div class="panel">
                 <div class="panel-header"><span>Interactive Levers</span><span class="badge">Live</span></div>
+
+                <!-- MAX LAND PRICE DISPLAY (mechanism 1): read-only ceiling -->
+                <div class="maxland-box" id="maxland-box" title="The highest land price that still hits the $350K/unit all-in cost target. Buy at or below this and the deal pencils (dev spread >= 0); pay more and returns go negative.">
+                    <div class="maxland-label">Max Land Price <span class="maxland-sub">to pencil @ $350K/unit</span></div>
+                    <div class="maxland-figs"><span class="maxland-val" id="maxland-val">&mdash;</span><span class="maxland-pu" id="maxland-pu"></span></div>
+                </div>
+
+                <!-- LAND PURCHASE PRICE LEVER (mechanism 2): $ field + %-of-max slider, kept in sync -->
+                <div class="lever-group lever-land">
+                    <div class="lever-header"><span>Land Purchase Price</span><span class="lever-val" id="val-land">&mdash;</span></div>
+                    <div class="land-dollar-row"><span class="land-dollar-prefix">$</span><input type="text" inputmode="numeric" id="inp-land-dollar" oninput="updateLandFromDollar()" onblur="renderLandLever()" placeholder="land $"><span class="land-pu" id="land-pu"></span></div>
+                    <input type="range" id="inp-land" min="0" max="120" step="1" value="100" oninput="updateLandFromSlider()">
+                    <div class="lever-range"><span>$0</span><span class="land-mark">max</span><span>120%</span></div>
+                </div>
 
                 <div class="lever-group">
                     <div class="lever-header"><span>Vacancy</span><span class="lever-val" id="val-vac">5.0%</span></div>
@@ -1347,6 +1376,8 @@ function updateUI(opts = {}) {
     document.getElementById('inp-rg').value = model.rentGrowth * 100;
     document.getElementById('inp-int').value = model.intRate * 100;
     document.getElementById('inp-ltc').value = model.permLtc * 100;
+    renderMaxLandDisplay();
+    renderLandLever();
 
     // Backend tab
     document.getElementById('be-addr').innerText = model.address || '—';
@@ -1958,7 +1989,7 @@ function loadDeal(m, units) {
 
     // Land defaults to the MAX supportable purchase price at $350K/unit all-in —
     // construction is fixed by the modular price book, so land is the lever.
-    try { const __rl = __residualLandForPPU(350000); if (__rl != null) model.landCost = __rl; } catch (e) {}
+    try { const __rl = __residualLandForPPU(350000); if (__rl != null) { model.landCost = __rl; __maxLand = __rl; } } catch (e) {}
     snapshot = runUnderwriting(model);
 
     document.getElementById('projName').innerHTML = m.name;
@@ -2099,6 +2130,56 @@ function refreshMixCheck() {
     }
 }
 
+const fLandDollar = v => (v || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
+
+// MECHANISM 1 — read-only ceiling: the max supportable land at $350K/unit all-in.
+function renderMaxLandDisplay() {
+    const el = document.getElementById('maxland-val'); if (!el) return;
+    const pu = document.getElementById('maxland-pu');
+    if (__maxLand == null || !model.units) { el.textContent = '\u2014'; if (pu) pu.textContent = __engineReady() ? '' : 'computing\u2026'; return; }
+    el.textContent = fMoneyM(__maxLand);
+    if (pu) pu.textContent = '$' + Math.round(__maxLand / model.units / 1000) + 'K/unit';
+}
+
+// MECHANISM 2 — combined lever: sync the $ field + the %-of-max slider to landCost.
+function renderLandLever() {
+    const slider = document.getElementById('inp-land'); if (!slider) return;
+    const dollar = document.getElementById('inp-land-dollar');
+    const pctEl = document.getElementById('val-land');
+    const puEl = document.getElementById('land-pu');
+    const land = model.landCost || 0;
+    if (!model.units || !land) {
+        slider.value = 100;
+        if (pctEl) pctEl.textContent = '\u2014';
+        if (dollar && document.activeElement !== dollar) dollar.value = land ? fLandDollar(land) : '';
+        if (puEl) puEl.textContent = '';
+        return;
+    }
+    const max = (__maxLand && __maxLand > 0) ? __maxLand : land;
+    const pct = (land / max) * 100;
+    slider.value = Math.max(0, Math.min(120, pct));
+    if (pctEl) pctEl.textContent = (__maxLand && __maxLand > 0) ? Math.round(pct) + '% of max' : fMoneyM(land);
+    if (dollar && document.activeElement !== dollar) dollar.value = fLandDollar(Math.round(land));
+    if (puEl) puEl.textContent = '$' + Math.round(land / model.units / 1000) + 'K/unit';
+}
+
+// Slider drag -> land = pct of the cached max (relative, deal-size-agnostic).
+function updateLandFromSlider() {
+    const pct = parseFloat(document.getElementById('inp-land').value) || 0;
+    const max = (__maxLand && __maxLand > 0) ? __maxLand : (model.landCost || 0);
+    model.landCost = Math.round(max * pct / 100);
+    const be = document.getElementById('be-land'); if (be) be.value = model.landCost || '';
+    updateUI();
+}
+
+// $ field edit -> land = the exact figure typed (dynamic, linked to purchase price).
+function updateLandFromDollar() {
+    const v = parseFloat((document.getElementById('inp-land-dollar').value + '').replace(/[^0-9.]/g, '')) || 0;
+    model.landCost = Math.round(v);
+    const be = document.getElementById('be-land'); if (be) be.value = model.landCost || '';
+    updateUI();
+}
+
 function updateModelFromUI() {
     if (compareMode && !snapshot) snapshot = runUnderwriting(model);
     model.vacancy = parseFloat(document.getElementById('inp-vac').value) / 100;
@@ -2186,6 +2267,7 @@ function parseAddressParts(addr) {
    lightweight JS estimates from runUnderwriting().
    ===================================================================== */
 let __engineKPIs = null;     // last computed return block
+let __maxLand = null;        // cached max supportable land @ $350K/unit (residual, total $)
 let __engineTimer = null;    // debounce handle
 
 const __engineReady = () => (typeof XLSX !== 'undefined' && typeof HyperFormula !== 'undefined');
@@ -2550,6 +2632,9 @@ function scheduleEngine() {
     __engineTimer = setTimeout(() => {
         __engineKPIs = computeEngineReturns(model);
         applyEngineKPIs();
+        try { const __ml = __residualLandForPPU(350000); if (__ml != null) __maxLand = __ml; } catch (e) {}
+        renderMaxLandDisplay();
+        renderLandLever();
     }, 120);
 }
 

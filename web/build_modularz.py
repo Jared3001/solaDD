@@ -708,7 +708,7 @@ function loadDeal(m, units) {'''
                 "    document.getElementById('projName').innerHTML = m.name;")
     new_snap = ("    // Land defaults to the MAX supportable purchase price at $350K/unit all-in —\n"
                 "    // construction is fixed by the modular price book, so land is the lever.\n"
-                "    try { const __rl = __residualLandForPPU(350000); if (__rl != null) model.landCost = __rl; } catch (e) {}\n"
+                "    try { const __rl = __residualLandForPPU(350000); if (__rl != null) { model.landCost = __rl; __maxLand = __rl; } } catch (e) {}\n"
                 "    snapshot = runUnderwriting(model);\n\n"
                 "    document.getElementById('projName').innerHTML = m.name;")
     if html.count(old_snap) != 1:
@@ -735,6 +735,144 @@ function loadDeal(m, units) {'''
     if html.count("let activeSensi = 'returns';") != 1:
         sys.exit("activeSensi default anchor not found uniquely")
     html = html.replace("let activeSensi = 'returns';", "let activeSensi = 'land';", 1)
+
+    # ---- 10. LAND PURCHASE PRICE on the Dashboard: a max-price DISPLAY plus a
+    #     combined $-field + %-of-max ADJUSTMENT lever (two separate mechanisms).
+    #     Land is now the primary point of analysis for modular deals, so both the
+    #     ceiling (max supportable @ $350K/unit) and the live knob live up front on
+    #     the Dashboard tab rather than buried in the Backend.
+    # 10a. Cache the residual so the lever's 100% anchor + the display are stable
+    #      across redraws (the residual is invariant to the land lever itself).
+    if html.count("let __engineKPIs = null;     // last computed return block") != 1:
+        sys.exit("__engineKPIs decl anchor not found uniquely")
+    html = html.replace(
+        "let __engineKPIs = null;     // last computed return block",
+        "let __engineKPIs = null;     // last computed return block\n"
+        "let __maxLand = null;        // cached max supportable land @ $350K/unit (residual, total $)",
+        1,
+    )
+
+    # 10b. UI: max-price display box + combined land lever, injected at the TOP of
+    #      the Interactive Levers panel (above the rate/vacancy sliders).
+    levers_anchor = '<div class="panel-header"><span>Interactive Levers</span><span class="badge">Live</span></div>'
+    land_ui = levers_anchor + '''
+
+                <!-- MAX LAND PRICE DISPLAY (mechanism 1): read-only ceiling -->
+                <div class="maxland-box" id="maxland-box" title="The highest land price that still hits the $350K/unit all-in cost target. Buy at or below this and the deal pencils (dev spread >= 0); pay more and returns go negative.">
+                    <div class="maxland-label">Max Land Price <span class="maxland-sub">to pencil @ $350K/unit</span></div>
+                    <div class="maxland-figs"><span class="maxland-val" id="maxland-val">&mdash;</span><span class="maxland-pu" id="maxland-pu"></span></div>
+                </div>
+
+                <!-- LAND PURCHASE PRICE LEVER (mechanism 2): $ field + %-of-max slider, kept in sync -->
+                <div class="lever-group lever-land">
+                    <div class="lever-header"><span>Land Purchase Price</span><span class="lever-val" id="val-land">&mdash;</span></div>
+                    <div class="land-dollar-row"><span class="land-dollar-prefix">$</span><input type="text" inputmode="numeric" id="inp-land-dollar" oninput="updateLandFromDollar()" onblur="renderLandLever()" placeholder="land $"><span class="land-pu" id="land-pu"></span></div>
+                    <input type="range" id="inp-land" min="0" max="120" step="1" value="100" oninput="updateLandFromSlider()">
+                    <div class="lever-range"><span>$0</span><span class="land-mark">max</span><span>120%</span></div>
+                </div>'''
+    if html.count(levers_anchor) != 1:
+        sys.exit("Interactive Levers panel-header anchor not found uniquely")
+    html = html.replace(levers_anchor, land_ui, 1)
+
+    # 10c. CSS for the display box + combined lever (re-uses the existing palette).
+    land_css = '''
+/* ============== LAND PRICE — max-price display + combined lever (injected) ============== */
+.maxland-box { display: flex; flex-direction: column; gap: 1px; background: linear-gradient(180deg, rgba(224,162,55,0.13), rgba(224,162,55,0.03)); border: 1px solid var(--accent); border-radius: 6px; padding: 7px 10px; margin-bottom: 12px; }
+.maxland-label { font-size: 10px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--text-muted); }
+.maxland-sub { font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--text-faint); }
+.maxland-figs { display: flex; align-items: baseline; gap: 8px; }
+.maxland-val { font-family: var(--font-mono); font-size: 18px; font-weight: 700; line-height: 1.1; color: var(--accent); }
+.maxland-pu { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.lever-land { padding-bottom: 11px; margin-bottom: 11px; border-bottom: 1px solid var(--border); }
+.land-dollar-row { display: flex; align-items: center; gap: 5px; margin-bottom: 6px; }
+.land-dollar-prefix { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+.land-dollar-row input { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 12px; border: 1px solid var(--border-strong); border-radius: 4px; padding: 3px 6px; background: var(--bg-subtle); color: var(--text-main); }
+.land-dollar-row input:focus { outline: none; border-color: var(--accent); }
+.land-pu { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); white-space: nowrap; }
+.lever-land .lever-range .land-mark { color: var(--accent); }
+</style>'''
+    if html.count("</style>") != 1:
+        sys.exit("land CSS </style> anchor not found uniquely")
+    html = html.replace("</style>", land_css, 1)
+
+    # 10d. Logic: the display + the combined lever. Both write model.landCost and
+    #      recompute; the % normalizes across deal sizes (100% = max), the $ field
+    #      links straight to the actual purchase price. Injected before
+    #      updateModelFromUI (the other Dashboard-lever handler).
+    land_js = '''const fLandDollar = v => (v || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
+
+// MECHANISM 1 — read-only ceiling: the max supportable land at $350K/unit all-in.
+function renderMaxLandDisplay() {
+    const el = document.getElementById('maxland-val'); if (!el) return;
+    const pu = document.getElementById('maxland-pu');
+    if (__maxLand == null || !model.units) { el.textContent = '\\u2014'; if (pu) pu.textContent = __engineReady() ? '' : 'computing\\u2026'; return; }
+    el.textContent = fMoneyM(__maxLand);
+    if (pu) pu.textContent = '$' + Math.round(__maxLand / model.units / 1000) + 'K/unit';
+}
+
+// MECHANISM 2 — combined lever: sync the $ field + the %-of-max slider to landCost.
+function renderLandLever() {
+    const slider = document.getElementById('inp-land'); if (!slider) return;
+    const dollar = document.getElementById('inp-land-dollar');
+    const pctEl = document.getElementById('val-land');
+    const puEl = document.getElementById('land-pu');
+    const land = model.landCost || 0;
+    if (!model.units || !land) {
+        slider.value = 100;
+        if (pctEl) pctEl.textContent = '\\u2014';
+        if (dollar && document.activeElement !== dollar) dollar.value = land ? fLandDollar(land) : '';
+        if (puEl) puEl.textContent = '';
+        return;
+    }
+    const max = (__maxLand && __maxLand > 0) ? __maxLand : land;
+    const pct = (land / max) * 100;
+    slider.value = Math.max(0, Math.min(120, pct));
+    if (pctEl) pctEl.textContent = (__maxLand && __maxLand > 0) ? Math.round(pct) + '% of max' : fMoneyM(land);
+    if (dollar && document.activeElement !== dollar) dollar.value = fLandDollar(Math.round(land));
+    if (puEl) puEl.textContent = '$' + Math.round(land / model.units / 1000) + 'K/unit';
+}
+
+// Slider drag -> land = pct of the cached max (relative, deal-size-agnostic).
+function updateLandFromSlider() {
+    const pct = parseFloat(document.getElementById('inp-land').value) || 0;
+    const max = (__maxLand && __maxLand > 0) ? __maxLand : (model.landCost || 0);
+    model.landCost = Math.round(max * pct / 100);
+    const be = document.getElementById('be-land'); if (be) be.value = model.landCost || '';
+    updateUI();
+}
+
+// $ field edit -> land = the exact figure typed (dynamic, linked to purchase price).
+function updateLandFromDollar() {
+    const v = parseFloat((document.getElementById('inp-land-dollar').value + '').replace(/[^0-9.]/g, '')) || 0;
+    model.landCost = Math.round(v);
+    const be = document.getElementById('be-land'); if (be) be.value = model.landCost || '';
+    updateUI();
+}
+
+function updateModelFromUI() {'''
+    if html.count("function updateModelFromUI() {") != 1:
+        sys.exit("updateModelFromUI anchor (land js inject) not found uniquely")
+    html = html.replace("function updateModelFromUI() {", land_js, 1)
+
+    # 10e. Keep both mechanisms live: sync them on every redraw (cached value, cheap)
+    #      and recompute the residual when the engine recomputes the KPIs.
+    old_uihook = "    document.getElementById('inp-ltc').value = model.permLtc * 100;"
+    new_uihook = (old_uihook + "\n"
+                  "    renderMaxLandDisplay();\n"
+                  "    renderLandLever();")
+    if html.count(old_uihook) != 1:
+        sys.exit("updateUI land render hook anchor not found uniquely")
+    html = html.replace(old_uihook, new_uihook, 1)
+
+    old_sched = ("        __engineKPIs = computeEngineReturns(model);\n"
+                 "        applyEngineKPIs();")
+    new_sched = (old_sched + "\n"
+                 "        try { const __ml = __residualLandForPPU(350000); if (__ml != null) __maxLand = __ml; } catch (e) {}\n"
+                 "        renderMaxLandDisplay();\n"
+                 "        renderLandLever();")
+    if html.count(old_sched) != 1:
+        sys.exit("scheduleEngine residual-recompute anchor not found uniquely")
+    html = html.replace(old_sched, new_sched, 1)
 
     # 9b. Engine branch: Levered IRR over Land $/unit (vary Dev Budget!G7) x Exit
     #     Cap (vary Dashboard!J5). The in-browser engine varies cells across sheets
