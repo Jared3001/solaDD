@@ -39,16 +39,17 @@ Open http://127.0.0.1:8000, sign in with `APP_PASSWORD`.
      Defaults to a temp dir, which resets on every redeploy. Point it at a
      **mounted Railway volume** if you want the time-saved counter and recent
      runs to persist across deploys.
-   - *(optional)* `ANTHROPIC_API_KEY` — enables **OM upload** (Claude reads the
-     Offering Memorandum PDF and auto-fills deal facts). Without it, the address
-     search still works; an uploaded OM just reports "needs ANTHROPIC_API_KEY".
-     Costs ~cents–dollars per OM depending on size/model; OM contents are sent to
-     the Anthropic API and not persisted server-side.
-   - *(optional)* `OM_MODEL` — model for OM extraction (default `claude-opus-4-8`;
-     set `claude-sonnet-4-6` or `claude-haiku-4-5` to cut cost).
-   - *(optional)* `OM_MAX_MB` — max OM PDF size in MB (default `150`). OMs are
-     uploaded via the Anthropic Files API (handles large/scanned decks) and the
-     uploaded file is deleted right after extraction.
+   - `GEMINI_API_KEY` — enables **OM upload** (Gemini reads the Offering
+     Memorandum PDF and auto-fills deal facts) and powers the ModularZ tool.
+     Without it, the address search still works; an uploaded OM just reports
+     "needs GEMINI_API_KEY". OM contents are sent to the Gemini API and not
+     persisted server-side.
+   - *(optional)* `GEMINI_OM_MODEL` — model for OM extraction (default
+     `gemini-2.5-flash`).
+   - *(optional)* `OM_MAX_MB` — max OM PDF size in MB (default `150`). PDFs at or
+     below `OM_INLINE_MB` (default `15`) are sent inline; larger decks are
+     uploaded via the Gemini Files API and the uploaded file is deleted right
+     after extraction.
 5. **Settings → Networking → Generate Domain** to get the team URL.
 6. **Settings → Healthcheck Path:** `/healthz` (returns plain `200`).
 7. Every push to the connected branch redeploys automatically.
@@ -68,8 +69,8 @@ Open http://127.0.0.1:8000, sign in with `APP_PASSWORD`.
   from, grouped by level (federal/national, California statewide, local/
   jurisdictional). The local table shows the Los Angeles vs San Diego source for
   each field. Static content from `jobs.SOURCE_CATALOG`.
-- **OM upload** (single-address mode, needs `ANTHROPIC_API_KEY`) — drop the
-  Offering Memorandum PDF and Claude extracts deal facts (price, land size,
+- **OM upload** (single-address mode, needs `GEMINI_API_KEY`) — drop the
+  Offering Memorandum PDF and Gemini extracts deal facts (price, land size,
   unit/tenant mix, escrow dates…). Values **default to the OM** and switch to a
   DD answer only when the DD process finds a different, **cited** value — those
   conflicts are flagged JUDGMENT with both values in the notes. An OM panel shows

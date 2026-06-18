@@ -1,35 +1,40 @@
 #!/usr/bin/env python3
 """
-om_extract.py — pull deal facts out of an Offering Memorandum (OM) PDF with Claude.
+om_extract.py — pull deal facts out of an Offering Memorandum (OM) PDF with Google Gemini.
 
 OMs are unstructured (often scanned) marketing PDFs, so extraction uses the
-Anthropic API: the PDF is uploaded via the Files API, Claude reads it natively
-(document content block referencing the file_id), and returns a validated,
-structured list of deal facts via structured outputs. Each extracted value
-carries a confidence and a short verbatim source quote for provenance. The
-uploaded file is deleted as soon as extraction returns.
+Gemini API (the same model the ModularZ tool uses): the PDF is sent to
+gemini-2.5-flash, which reads it natively, and returns a validated, structured
+list of deal facts via Gemini's JSON-schema response mode. Each extracted value
+carries a confidence and a short verbatim source quote for provenance.
 
-Using the Files API (rather than inlining base64) lets this handle large,
-scanned OM decks — up to the Files API's 500 MB limit.
+Small PDFs are sent inline (base64) in the generateContent request; larger decks
+go through the Gemini Files API (resumable upload), referenced by URI, and the
+uploaded file is deleted as soon as extraction returns. This lets the module
+handle large, scanned OM decks without inlining megabytes into every request.
 
 These map onto the schema's `fill_method: desk_om` fields — the deal facts the OM
 is authoritative for (price, land size, unit/tenant mix, escrow dates, …). The
 caller (jobs.py) reconciles them against the DD readers: default to the OM, switch
 to a DD answer only when the DD process produces a different, cited value.
 
-Requires ANTHROPIC_API_KEY. Model is OM_MODEL (default claude-opus-4-8; set to
-claude-sonnet-4-6 / claude-haiku-4-5 to cut cost).
+Requires GEMINI_API_KEY (the same key the ModularZ page uses). Model is
+GEMINI_OM_MODEL (default gemini-2.5-flash).
 """
-import io
+import base64
+import json
 import os
-from typing import Literal, Optional
+from typing import Optional
 
-from pydantic import BaseModel
+import requests
 
-OM_MODEL = os.environ.get("OM_MODEL", "claude-opus-4-8")
-FILES_BETA = "files-api-2025-04-14"
-# Generous cap (well above typical OM decks); the Files API itself allows up to 500 MB.
+GEMINI_OM_MODEL = os.environ.get("GEMINI_OM_MODEL", "gemini-2.5-flash")
+_API_ROOT = "https://generativelanguage.googleapis.com"
+# Generous cap (well above typical OM decks). PDFs at/below this go inline; larger
+# decks use the Files API. The Gemini request limit for inline data is ~20 MB.
 MAX_PDF_BYTES = int(os.environ.get("OM_MAX_MB", "150")) * 1024 * 1024
+_INLINE_MAX_BYTES = int(os.environ.get("OM_INLINE_MB", "15")) * 1024 * 1024
+_HTTP_TIMEOUT = int(os.environ.get("OM_HTTP_TIMEOUT", "180"))
 
 # Deal-fact fields the OM is authoritative for (schema fill_method: desk_om),
 # field_id -> human description that guides extraction.
@@ -57,25 +62,29 @@ OM_FIELDS = {
     "city_jurisdiction": "City / jurisdiction, if explicitly stated",
 }
 
-_FieldId = Literal[
-    "address", "apn", "acquisition_price", "land_sf", "estimated_unit_count",
-    "existing_residential_units", "units_to_vacate_at_coe", "units_rent_stabilized",
-    "units_owner_occupied", "units_requiring_replacement_sb8", "commercial_tenants",
-    "gross_rents_in_place", "longest_remaining_lease_expiry", "sb8", "status",
-    "revenue_classification", "entitlement_strategy", "contingency_removal_date",
-    "est_close_of_escrow", "county", "city_jurisdiction",
-]
+_FIELD_IDS = list(OM_FIELDS.keys())
 
-
-class OMField(BaseModel):
-    field_id: _FieldId
-    value: str                                  # the extracted value, normalized to a clean string
-    confidence: Literal["high", "medium", "low"]
-    source_quote: str                           # short verbatim snippet from the OM (provenance)
-
-
-class OMExtract(BaseModel):
-    fields: list[OMField]
+# Gemini response schema (subset of OpenAPI): one validated entry per OM field.
+_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "fields": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "field_id": {"type": "string", "enum": _FIELD_IDS},
+                    "value": {"type": "string"},
+                    "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                    "source_quote": {"type": "string"},
+                },
+                "required": ["field_id", "value", "confidence", "source_quote"],
+                "propertyOrdering": ["field_id", "value", "confidence", "source_quote"],
+            },
+        },
+    },
+    "required": ["fields"],
+}
 
 
 def _prompt() -> str:
@@ -102,12 +111,130 @@ class OMExtractError(RuntimeError):
     pass
 
 
+def _generate(api_key: str, pdf_part: dict) -> dict:
+    """POST one generateContent request and return the parsed JSON response."""
+    url = f"{_API_ROOT}/v1beta/models/{GEMINI_OM_MODEL}:generateContent?key={api_key}"
+    body = {
+        "contents": [{
+            "role": "user",
+            "parts": [{"text": _prompt()}, pdf_part],
+        }],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": _RESPONSE_SCHEMA,
+            "temperature": 0,
+        },
+    }
+    r = requests.post(url, json=body, timeout=_HTTP_TIMEOUT)
+    if r.status_code != 200:
+        raise OMExtractError(f"Gemini API error during OM extraction ({r.status_code}): {r.text[:400]}")
+    return r.json()
+
+
+def _upload_via_files_api(api_key: str, pdf_bytes: bytes, filename: str) -> str:
+    """Resumable-upload a PDF to the Gemini Files API; return (file_name, file_uri)."""
+    start = requests.post(
+        f"{_API_ROOT}/upload/v1beta/files?key={api_key}",
+        headers={
+            "X-Goog-Upload-Protocol": "resumable",
+            "X-Goog-Upload-Command": "start",
+            "X-Goog-Upload-Header-Content-Length": str(len(pdf_bytes)),
+            "X-Goog-Upload-Header-Content-Type": "application/pdf",
+            "Content-Type": "application/json",
+        },
+        json={"file": {"display_name": filename or "om.pdf"}},
+        timeout=_HTTP_TIMEOUT,
+    )
+    if start.status_code != 200:
+        raise OMExtractError(f"Gemini Files API upload-start failed ({start.status_code}): {start.text[:300]}")
+    upload_url = start.headers.get("X-Goog-Upload-URL")
+    if not upload_url:
+        raise OMExtractError("Gemini Files API did not return an upload URL.")
+
+    up = requests.post(
+        upload_url,
+        headers={
+            "Content-Length": str(len(pdf_bytes)),
+            "X-Goog-Upload-Offset": "0",
+            "X-Goog-Upload-Command": "upload, finalize",
+        },
+        data=pdf_bytes,
+        timeout=_HTTP_TIMEOUT,
+    )
+    if up.status_code != 200:
+        raise OMExtractError(f"Gemini Files API upload failed ({up.status_code}): {up.text[:300]}")
+    info = (up.json() or {}).get("file") or {}
+    name, uri, state = info.get("name"), info.get("uri"), info.get("state")
+    if not uri or not name:
+        raise OMExtractError("Gemini Files API upload returned no file URI.")
+
+    # PDFs are usually ACTIVE immediately; poll briefly while PROCESSING.
+    tries = 0
+    while state == "PROCESSING" and tries < 15:
+        import time
+        time.sleep(2)
+        poll = requests.get(f"{_API_ROOT}/v1beta/{name}?key={api_key}", timeout=_HTTP_TIMEOUT)
+        info = poll.json() if poll.status_code == 200 else {}
+        state = info.get("state", state)
+        tries += 1
+    if state == "FAILED":
+        raise OMExtractError("Gemini failed to process the uploaded OM PDF.")
+    return name, uri
+
+
+def _delete_file(api_key: str, name: str) -> None:
+    try:
+        requests.delete(f"{_API_ROOT}/v1beta/{name}?key={api_key}", timeout=30)
+    except Exception:
+        pass
+
+
+def _parse_response(resp: dict) -> list[dict]:
+    """Pull the model's JSON text out of a generateContent response and validate it."""
+    candidates = resp.get("candidates") or []
+    if not candidates:
+        return []
+    parts = (candidates[0].get("content") or {}).get("parts") or []
+    text = "".join(p.get("text", "") for p in parts).strip()
+    if not text:
+        return []
+    # responseMimeType=application/json should give clean JSON; strip fences defensively.
+    if text.startswith("```"):
+        text = text.strip("`")
+        text = text[text.find("{"):] if "{" in text else text
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise OMExtractError(f"Gemini returned non-JSON OM output: {e}") from e
+
+    seen, out = set(), []
+    for f in (data.get("fields") or []):
+        fid = f.get("field_id")
+        if fid not in OM_FIELDS or fid in seen:
+            continue
+        value = str(f.get("value", "")).strip()
+        if not value:
+            continue
+        conf = f.get("confidence")
+        if conf not in ("high", "medium", "low"):
+            conf = "medium"
+        seen.add(fid)
+        out.append({
+            "field_id": fid,
+            "value": value,
+            "confidence": conf,
+            "source_quote": str(f.get("source_quote", "")).strip()[:300],
+        })
+    return out
+
+
 def extract(pdf_bytes: bytes, filename: str = "om.pdf") -> list[dict]:
     """Extract OM deal facts. Returns [{field_id, value, confidence, source_quote}, ...].
 
     Raises OMExtractError on a missing API key, an oversized PDF, or an API failure."""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        raise OMExtractError("OM extraction needs ANTHROPIC_API_KEY set on the server.")
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise OMExtractError("OM extraction needs GEMINI_API_KEY set on the server.")
     if not pdf_bytes:
         raise OMExtractError("Empty OM upload.")
     if len(pdf_bytes) > MAX_PDF_BYTES:
@@ -115,50 +242,22 @@ def extract(pdf_bytes: bytes, filename: str = "om.pdf") -> list[dict]:
             f"OM is {len(pdf_bytes) / 1e6:.0f} MB; the limit is {MAX_PDF_BYTES // (1024*1024)} MB. "
             "Compress or trim the PDF and retry.")
 
-    import anthropic   # imported lazily so the app runs without the dep until OM is used
+    if len(pdf_bytes) <= _INLINE_MAX_BYTES:
+        # Small enough to inline as base64 — one request, no upload/cleanup.
+        part = {"inlineData": {"mimeType": "application/pdf",
+                               "data": base64.b64encode(pdf_bytes).decode("ascii")}}
+        return _parse_response(_generate(api_key, part))
 
-    client = anthropic.Anthropic()
-
-    # Upload via the Files API, reference by file_id, delete when done.
-    uploaded = client.beta.files.upload(
-        file=(filename or "om.pdf", io.BytesIO(pdf_bytes), "application/pdf"),
-    )
+    # Large deck: upload via the Files API, reference by URI, delete when done.
+    name, uri = _upload_via_files_api(api_key, pdf_bytes, filename)
     try:
-        msg = client.beta.messages.parse(
-            betas=[FILES_BETA],
-            model=OM_MODEL,
-            max_tokens=8192,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": _prompt()},
-                    {"type": "document", "source": {"type": "file", "file_id": uploaded.id}},
-                ],
-            }],
-            output_format=OMExtract,
-        )
-    except anthropic.APIError as e:
-        raise OMExtractError(f"Claude API error during OM extraction: {e}") from e
+        part = {"fileData": {"mimeType": "application/pdf", "fileUri": uri}}
+        return _parse_response(_generate(api_key, part))
     finally:
-        try:
-            client.beta.files.delete(uploaded.id)
-        except Exception:
-            pass
-
-    parsed: Optional[OMExtract] = msg.parsed_output
-    if not parsed:
-        return []
-    # De-dupe to one entry per field_id (first wins — the model is told to pick the authoritative one).
-    seen, out = set(), []
-    for f in parsed.fields:
-        if f.field_id in OM_FIELDS and f.field_id not in seen:
-            seen.add(f.field_id)
-            out.append({"field_id": f.field_id, "value": f.value.strip(),
-                        "confidence": f.confidence, "source_quote": f.source_quote.strip()[:300]})
-    return out
+        _delete_file(api_key, name)
 
 
 if __name__ == "__main__":
-    import sys, json
+    import sys
     data = open(sys.argv[1], "rb").read()
     print(json.dumps(extract(data, os.path.basename(sys.argv[1])), indent=2))

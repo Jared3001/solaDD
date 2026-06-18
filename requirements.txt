@@ -1,7 +1,7 @@
 # Web front end + the DD pipeline's own deps (pinned to the working venv).
 Flask>=3.0,<4
 gunicorn>=21.2
-anthropic>=0.69          # OM extraction (Claude API); pulls in pydantic
+# OM extraction calls the Gemini REST API directly via `requests` (below) — no SDK.
 
 # pipeline deps (mirror build/sources requirements)
 openpyxl==3.1.5
