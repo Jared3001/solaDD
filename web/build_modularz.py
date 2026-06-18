@@ -242,7 +242,7 @@ function excelDateSerial(d) {'''
         rentGrowth: model.rentGrowth || 0.025,
         costEscalation: model.escalationRate || 0.04,
         landCost: model.landCost || 0,
-        onsiteCostPU: model.onsiteCostPerUnit || 90000,
+        onsiteCostPU: (model.onsiteCostPerUnit != null ? model.onsiteCostPerUnit : 90000),
         exitCap: model.capRate || 0.0675,
         constrLTC: model.constLtc || 0.70,
         constrRate: model.constRate || 0.09,
@@ -302,6 +302,10 @@ function buildInputPatches(model) {
 
     // ----- (Z+) Dev Budget sheet (sheet3) -----
     add('(Z+) Dev Budget', 'G7', I.landCost);
+    // Modular construction cost per unit by bed type (the modular price book).
+    add('(Z+) Dev Budget', 'E14', model.modCost1BR != null ? model.modCost1BR : 95000);
+    add('(Z+) Dev Budget', 'E15', model.modCost2BR != null ? model.modCost2BR : 140000);
+    add('(Z+) Dev Budget', 'E16', model.modCost3BR != null ? model.modCost3BR : 185000);
 
     // ----- (Z+) Financing sheet (sheet5) -----
     add('(Z+) Financing', 'D34', I.permLTV);
@@ -635,6 +639,71 @@ function renderDeltas(res) {'''
     if html.count(old_hook) != 1:
         sys.exit("updateUI hook anchor not found uniquely")
     html = html.replace(old_hook, new_hook, 1)
+
+    # ---- 8. COST MODEL: modular price book + land as residual to $350K/unit ---
+    #     Construction is fixed by the modular $/unit price book; land becomes the
+    #     derived "max supportable purchase price" so the team negotiates on land.
+    # 8a. STATE defaults (the initial model object).
+    old_state = ("    modCost1BR: 90000,   // proforma defaults\n"
+                 "    modCost2BR: 160000,\n"
+                 "    modCost3BR: 180000,\n"
+                 "    onsiteCostPerUnit: 90000,")
+    new_state = ("    modCost1BR: 95000,   // modular price book (total construction $/unit by bed)\n"
+                 "    modCost2BR: 140000,\n"
+                 "    modCost3BR: 185000,\n"
+                 "    onsiteCostPerUnit: 0,   // construction captured fully in the modular $/unit above")
+    if html.count(old_state) != 1:
+        sys.exit("STATE cost defaults anchor not found uniquely")
+    html = html.replace(old_state, new_state, 1)
+
+    # 8b. loadDeal cost defaults: modular price book, onsite folded in (=0).
+    old_ld_cost = ("        onsiteCostPerUnit: Math.max(40000, Math.round((m.hardCost * gsf - units * 90000 - units * 1500) / (units * 1.03))),\n"
+                   "        modCost1BR: 90000, modCost2BR: 160000, modCost3BR: 180000,")
+    new_ld_cost = ("        onsiteCostPerUnit: 0,\n"
+                   "        modCost1BR: 95000, modCost2BR: 140000, modCost3BR: 185000,")
+    if html.count(old_ld_cost) != 1:
+        sys.exit("loadDeal cost defaults anchor not found uniquely")
+    html = html.replace(old_ld_cost, new_ld_cost, 1)
+
+    # 8c. Residual-land helper (max supportable purchase price at a target PPU).
+    residual_helper = '''// Back-solve the land cost that brings all-in dev cost to targetPPU per unit, using
+// the proforma engine (TDC is ~linear in land). Returns the max supportable land
+// ("residual" / max purchase price), clamped >= 0, or null if the engine isn't ready.
+function __residualLandForPPU(targetPPU) {
+    if (typeof computeEngineReturns !== 'function' || typeof __engineReady !== 'function' || !__engineReady() || !model.units) return null;
+    const tdcAt = (L) => { const e = computeEngineReturns({ ...model, landCost: L }); return e ? e.tdc : null; };
+    const L1 = Math.max(1e6, model.landCost || 1e6), L2 = L1 * 0.5;
+    const t1 = tdcAt(L1), t2 = tdcAt(L2);
+    if (t1 == null || t2 == null || t1 === t2) return null;
+    const slope = (t1 - t2) / (L1 - L2), intercept = t1 - slope * L1;
+    const land = (targetPPU * model.units - intercept) / slope;
+    return (isFinite(land)) ? Math.max(0, Math.round(land)) : null;
+}
+
+function loadDeal(m, units) {'''
+    if html.count("function loadDeal(m, units) {") != 1:
+        sys.exit("loadDeal anchor not found uniquely")
+    html = html.replace("function loadDeal(m, units) {", residual_helper, 1)
+
+    # 8d. In loadDeal, set land to the residual (max supportable) before snapshot.
+    old_snap = ("    snapshot = runUnderwriting(model);\n\n"
+                "    document.getElementById('projName').innerHTML = m.name;")
+    new_snap = ("    // Land defaults to the MAX supportable purchase price at $350K/unit all-in —\n"
+                "    // construction is fixed by the modular price book, so land is the lever.\n"
+                "    try { const __rl = __residualLandForPPU(350000); if (__rl != null) model.landCost = __rl; } catch (e) {}\n"
+                "    snapshot = runUnderwriting(model);\n\n"
+                "    document.getElementById('projName').innerHTML = m.name;")
+    if html.count(old_snap) != 1:
+        sys.exit("loadDeal snapshot anchor not found uniquely")
+    html = html.replace(old_snap, new_snap, 1)
+
+    # 8e. Market-research message: label the comp land as market asking (the modeled
+    #     land is the residual, shown in the Backend), to avoid a contradictory total.
+    old_landline = '<div class="data-line"><span>Land Basis</span><span>$${m.landPerSf}/buildable SF (~$${(landCost/1e6).toFixed(1)}M)</span></div>'
+    new_landline = '<div class="data-line"><span>Market Land (asking)</span><span>$${m.landPerSf}/buildable SF</span></div>\n        <div class="data-line"><span>Modeled Land</span><span>max @ $350K/unit · see Backend</span></div>'
+    if html.count(old_landline) != 1:
+        sys.exit("loadDeal land-basis message anchor not found uniquely")
+    html = html.replace(old_landline, new_landline, 1)
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:

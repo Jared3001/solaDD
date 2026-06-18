@@ -370,31 +370,31 @@ body { flex-direction: column; }
 
                 <div class="lever-group">
                     <div class="lever-header"><span>Vacancy</span><span class="lever-val" id="val-vac">5.0%</span></div>
-                    <input type="range" id="inp-vac" min="2" max="15" step="0.5" value="5" oninput="previewLever('val-vac', this.value, 1)" onchange="updateModelFromUI()">
+                    <input type="range" id="inp-vac" min="2" max="15" step="0.5" value="5" oninput="updateModelFromUI()">
                     <div class="lever-range"><span>2%</span><span>15%</span></div>
                 </div>
 
                 <div class="lever-group">
                     <div class="lever-header"><span>Exit Cap Rate</span><span class="lever-val" id="val-cap">5.50%</span></div>
-                    <input type="range" id="inp-cap" min="4" max="8" step="0.05" value="5.5" oninput="previewLever('val-cap', this.value, 2)" onchange="updateModelFromUI()">
+                    <input type="range" id="inp-cap" min="4" max="8" step="0.05" value="5.5" oninput="updateModelFromUI()">
                     <div class="lever-range"><span>4.00%</span><span>8.00%</span></div>
                 </div>
 
                 <div class="lever-group">
                     <div class="lever-header"><span>Annual Rent Growth</span><span class="lever-val" id="val-rg">2.5%</span></div>
-                    <input type="range" id="inp-rg" min="0" max="6" step="0.25" value="2.5" oninput="previewLever('val-rg', this.value, 2)" onchange="updateModelFromUI()">
+                    <input type="range" id="inp-rg" min="0" max="6" step="0.25" value="2.5" oninput="updateModelFromUI()">
                     <div class="lever-range"><span>0%</span><span>6%</span></div>
                 </div>
 
                 <div class="lever-group">
                     <div class="lever-header"><span>Perm Interest Rate</span><span class="lever-val" id="val-int">6.25%</span></div>
-                    <input type="range" id="inp-int" min="4" max="9" step="0.125" value="6.25" oninput="previewLever('val-int', this.value, 2)" onchange="updateModelFromUI()">
+                    <input type="range" id="inp-int" min="4" max="9" step="0.125" value="6.25" oninput="updateModelFromUI()">
                     <div class="lever-range"><span>4%</span><span>9%</span></div>
                 </div>
 
                 <div class="lever-group">
                     <div class="lever-header"><span>Loan-to-Cost</span><span class="lever-val" id="val-ltc">65%</span></div>
-                    <input type="range" id="inp-ltc" min="40" max="75" step="1" value="65" oninput="previewLever('val-ltc', this.value, 0)" onchange="updateModelFromUI()">
+                    <input type="range" id="inp-ltc" min="40" max="75" step="1" value="65" oninput="updateModelFromUI()">
                     <div class="lever-range"><span>40%</span><span>75%</span></div>
                 </div>
             </div>
@@ -609,10 +609,10 @@ let model = {
     // Costs
     landCost: 0,
     hardCostPerSf: 0,    // per GSF — display only, kept for chat compatibility (drives onsite cost)
-    modCost1BR: 90000,   // proforma defaults
-    modCost2BR: 160000,
-    modCost3BR: 180000,
-    onsiteCostPerUnit: 90000,
+    modCost1BR: 95000,   // modular price book (total construction $/unit by bed)
+    modCost2BR: 140000,
+    modCost3BR: 185000,
+    onsiteCostPerUnit: 0,   // construction captured fully in the modular $/unit above
     transportPerUnit: 1500,
     escalationRate: 0.04,
     softCostRatio: 0.10,    // recalibrated from 0.22 to match proforma's actual line-item total
@@ -1854,6 +1854,20 @@ async function processCommand(text) {
 /* =====================================================================
    MARKET RESEARCH HANDLER
    ===================================================================== */
+// Back-solve the land cost that brings all-in dev cost to targetPPU per unit, using
+// the proforma engine (TDC is ~linear in land). Returns the max supportable land
+// ("residual" / max purchase price), clamped >= 0, or null if the engine isn't ready.
+function __residualLandForPPU(targetPPU) {
+    if (typeof computeEngineReturns !== 'function' || typeof __engineReady !== 'function' || !__engineReady() || !model.units) return null;
+    const tdcAt = (L) => { const e = computeEngineReturns({ ...model, landCost: L }); return e ? e.tdc : null; };
+    const L1 = Math.max(1e6, model.landCost || 1e6), L2 = L1 * 0.5;
+    const t1 = tdcAt(L1), t2 = tdcAt(L2);
+    if (t1 == null || t2 == null || t1 === t2) return null;
+    const slope = (t1 - t2) / (L1 - L2), intercept = t1 - slope * L1;
+    const land = (targetPPU * model.units - intercept) / slope;
+    return (isFinite(land)) ? Math.max(0, Math.round(land)) : null;
+}
+
 function loadDeal(m, units) {
     // Compute massing from market profile
     const avgUnitSize = m.rentPerUnit / m.rentPerSf;
@@ -1886,7 +1900,8 @@ function loadDeal(m, units) {
         <div class="data-line"><span>Market Cap Rate</span><span>${(m.cap*100).toFixed(2)}%</span></div>
         <div class="data-line"><span>3-Yr Rent Growth</span><span>${(m.rg3yr*100).toFixed(1)}%</span></div>
         <div class="data-line"><span>Hard Cost</span><span>$${m.hardCost}/GSF</span></div>
-        <div class="data-line"><span>Land Basis</span><span>$${m.landPerSf}/buildable SF (~$${(landCost/1e6).toFixed(1)}M)</span></div>
+        <div class="data-line"><span>Market Land (asking)</span><span>$${m.landPerSf}/buildable SF</span></div>
+        <div class="data-line"><span>Modeled Land</span><span>max @ $350K/unit · see Backend</span></div>
         <div class="data-line"><span>OpEx Ratio</span><span>${(m.opex*100).toFixed(0)}% of EGI</span></div>
         <div class="data-line"><span>Source</span><span>${provLabel}</span></div>
         ${provNote}
@@ -1911,8 +1926,8 @@ function loadDeal(m, units) {
         // Back-solve onsite cost so total hard ≈ market's $/GSF × GSF (modular + onsite + transport + escalation ≈ target)
         // target_hard = modular_1BR_total + onsite × units + transport × units + ~3% escalation on onsite
         //   → onsite ≈ (target_hard - modular_total - transport_total) / (units × 1.03)
-        onsiteCostPerUnit: Math.max(40000, Math.round((m.hardCost * gsf - units * 90000 - units * 1500) / (units * 1.03))),
-        modCost1BR: 90000, modCost2BR: 160000, modCost3BR: 180000,
+        onsiteCostPerUnit: 0,
+        modCost1BR: 95000, modCost2BR: 140000, modCost3BR: 185000,
         transportPerUnit: 1500, escalationRate: 0.04,
         preconMonths: 6, constructionMonths: 12, leaseUpMonths: 6,
         softCostRatio: 0.10, contingencyRatio: 0.05, devFeeRatio: 0.04,
@@ -1921,6 +1936,9 @@ function loadDeal(m, units) {
         rentGrowth: m.rg3yr
     });
 
+    // Land defaults to the MAX supportable purchase price at $350K/unit all-in —
+    // construction is fixed by the modular price book, so land is the lever.
+    try { const __rl = __residualLandForPPU(350000); if (__rl != null) model.landCost = __rl; } catch (e) {}
     snapshot = runUnderwriting(model);
 
     document.getElementById('projName').innerHTML = m.name;
@@ -2061,13 +2079,6 @@ function refreshMixCheck() {
     }
 }
 
-// Live label update while dragging — refreshes only the readout next to the
-// slider, NOT the model/KPIs (those wait for onchange / value selection).
-function previewLever(labelId, val, decimals) {
-    const el = document.getElementById(labelId);
-    if (el) el.innerText = parseFloat(val).toFixed(decimals) + '%';
-}
-
 function updateModelFromUI() {
     if (compareMode && !snapshot) snapshot = runUnderwriting(model);
     model.vacancy = parseFloat(document.getElementById('inp-vac').value) / 100;
@@ -2188,7 +2199,7 @@ function modelToInp(model) {
         rentGrowth: model.rentGrowth || 0.025,
         costEscalation: model.escalationRate || 0.04,
         landCost: model.landCost || 0,
-        onsiteCostPU: model.onsiteCostPerUnit || 90000,
+        onsiteCostPU: (model.onsiteCostPerUnit != null ? model.onsiteCostPerUnit : 90000),
         exitCap: model.capRate || 0.0675,
         constrLTC: model.constLtc || 0.70,
         constrRate: model.constRate || 0.09,
@@ -2248,6 +2259,10 @@ function buildInputPatches(model) {
 
     // ----- (Z+) Dev Budget sheet (sheet3) -----
     add('(Z+) Dev Budget', 'G7', I.landCost);
+    // Modular construction cost per unit by bed type (the modular price book).
+    add('(Z+) Dev Budget', 'E14', model.modCost1BR != null ? model.modCost1BR : 95000);
+    add('(Z+) Dev Budget', 'E15', model.modCost2BR != null ? model.modCost2BR : 140000);
+    add('(Z+) Dev Budget', 'E16', model.modCost3BR != null ? model.modCost3BR : 185000);
 
     // ----- (Z+) Financing sheet (sheet5) -----
     add('(Z+) Financing', 'D34', I.permLTV);
