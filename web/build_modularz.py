@@ -706,9 +706,9 @@ function loadDeal(m, units) {'''
     # 8d. In loadDeal, set land to the residual (max supportable) before snapshot.
     old_snap = ("    snapshot = runUnderwriting(model);\n\n"
                 "    document.getElementById('projName').innerHTML = m.name;")
-    new_snap = ("    // Land defaults to the MAX supportable purchase price at $350K/unit all-in —\n"
+    new_snap = ("    // Land defaults to the MAX supportable purchase price at the target $/unit all-in —\n"
                 "    // construction is fixed by the modular price book, so land is the lever.\n"
-                "    try { const __rl = __residualLandForPPU(350000); if (__rl != null) { model.landCost = __rl; __maxLand = __rl; } } catch (e) {}\n"
+                "    try { const __rl = __residualLandForPPU(model.targetPPU || 350000); if (__rl != null) { model.landCost = __rl; __maxLand = __rl; } } catch (e) {}\n"
                 "    snapshot = runUnderwriting(model);\n\n"
                 "    document.getElementById('projName').innerHTML = m.name;")
     if html.count(old_snap) != 1:
@@ -718,7 +718,7 @@ function loadDeal(m, units) {'''
     # 8e. Market-research message: label the comp land as market asking (the modeled
     #     land is the residual, shown in the Backend), to avoid a contradictory total.
     old_landline = '<div class="data-line"><span>Land Basis</span><span>$${m.landPerSf}/buildable SF (~$${(landCost/1e6).toFixed(1)}M)</span></div>'
-    new_landline = '<div class="data-line"><span>Market Land (asking)</span><span>$${m.landPerSf}/buildable SF</span></div>\n        <div class="data-line"><span>Modeled Land</span><span>max @ $350K/unit · see Backend</span></div>'
+    new_landline = '<div class="data-line"><span>Market Land (asking)</span><span>$${m.landPerSf}/buildable SF</span></div>\n        <div class="data-line"><span>Modeled Land</span><span>max @ $${Math.round((model.targetPPU||350000)/1000)}K/unit · see Backend</span></div>'
     if html.count(old_landline) != 1:
         sys.exit("loadDeal land-basis message anchor not found uniquely")
     html = html.replace(old_landline, new_landline, 1)
@@ -758,8 +758,8 @@ function loadDeal(m, units) {'''
     land_ui = levers_anchor + '''
 
                 <!-- MAX LAND PRICE DISPLAY (mechanism 1): read-only ceiling -->
-                <div class="maxland-box" id="maxland-box" title="The highest land price that still hits the $350K/unit all-in cost target. Buy at or below this and the deal pencils (dev spread >= 0); pay more and returns go negative.">
-                    <div class="maxland-label">Max Land Price <span class="maxland-sub">to pencil @ $350K/unit</span></div>
+                <div class="maxland-box" id="maxland-box" title="The highest land price that still hits the all-in cost-per-unit target. Buy at or below this and the deal pencils (dev spread >= 0); pay more and returns go negative. Change the target in the Backend tab (Hard Costs).">
+                    <div class="maxland-label">Max Land Price <span class="maxland-sub">to pencil @ <span id="maxland-target">$350K</span>/unit</span></div>
                     <div class="maxland-figs"><span class="maxland-val" id="maxland-val">&mdash;</span><span class="maxland-pu" id="maxland-pu"></span></div>
                 </div>
 
@@ -805,6 +805,8 @@ function loadDeal(m, units) {'''
 function renderMaxLandDisplay() {
     const el = document.getElementById('maxland-val'); if (!el) return;
     const pu = document.getElementById('maxland-pu');
+    const tgt = document.getElementById('maxland-target');
+    if (tgt) tgt.textContent = '$' + Math.round((model.targetPPU || 350000) / 1000) + 'K';
     if (__maxLand == null || !model.units) { el.textContent = '\\u2014'; if (pu) pu.textContent = __engineReady() ? '' : 'computing\\u2026'; return; }
     el.textContent = fMoneyM(__maxLand);
     if (pu) pu.textContent = '$' + Math.round(__maxLand / model.units / 1000) + 'K/unit';
@@ -867,7 +869,7 @@ function updateModelFromUI() {'''
     old_sched = ("        __engineKPIs = computeEngineReturns(model);\n"
                  "        applyEngineKPIs();")
     new_sched = (old_sched + "\n"
-                 "        try { const __ml = __residualLandForPPU(350000); if (__ml != null) __maxLand = __ml; } catch (e) {}\n"
+                 "        try { const __ml = __residualLandForPPU(model.targetPPU || 350000); if (__ml != null) __maxLand = __ml; } catch (e) {}\n"
                  "        renderMaxLandDisplay();\n"
                  "        renderLandLever();")
     if html.count(old_sched) != 1:
@@ -914,6 +916,43 @@ function updateModelFromUI() {'''
     if html.count(old_install) != 1:
         sys.exit("onsite installDataTable anchor not found uniquely")
     html = html.replace(old_install, new_install, 1)
+
+    # ---- 11. EDITABLE target cost/unit (the max-land basis). Default $350K, but
+    #     now a model field with a Backend input so the team can dial the ceiling.
+    # 11a. STATE default.
+    old_costs = "    // Costs\n    landCost: 0,"
+    new_costs = ("    // Costs\n"
+                 "    targetPPU: 350000,   // all-in cost/unit target -> sets the max supportable land ceiling\n"
+                 "    landCost: 0,")
+    if html.count(old_costs) != 1:
+        sys.exit("STATE // Costs landCost anchor not found uniquely")
+    html = html.replace(old_costs, new_costs, 1)
+
+    # 11b. Backend input in the Hard Costs panel, above Land Acquisition.
+    land_li = '<li><span>Land Acquisition</span><input type="number" id="be-land" oninput="updateFromBackend()"></li>'
+    target_li = ('<li title="The all-in cost-per-unit target that sets the Max Land Price ceiling on the Dashboard. Lower it to be more conservative; raise it to support a higher land price."><span>Target Cost / Unit <span style="color: var(--text-faint); font-size: 10px;">(max-land basis)</span></span><input type="number" step="5000" min="0" id="be-target-ppu" oninput="updateFromBackend()"></li>\n                    '
+                 + land_li)
+    if html.count(land_li) != 1:
+        sys.exit("Hard Costs Land Acquisition <li> anchor not found uniquely")
+    html = html.replace(land_li, target_li, 1)
+
+    # 11c. updateFromBackend: read the target (sanity floor so a blank/0 doesn't
+    #      collapse the ceiling). Changing it recomputes __maxLand via updateUI.
+    old_readland = "    model.landCost = parseFloat(document.getElementById('be-land').value) || model.landCost;"
+    new_readland = ("    const __tppu = parseFloat(document.getElementById('be-target-ppu').value);\n"
+                    "    if (isFinite(__tppu) && __tppu > 0) model.targetPPU = Math.round(__tppu);\n"
+                    + old_readland)
+    if html.count(old_readland) != 1:
+        sys.exit("updateFromBackend be-land read anchor not found uniquely")
+    html = html.replace(old_readland, new_readland, 1)
+
+    # 11d. updateUI: keep the Backend input in sync with the model.
+    old_uiland = "    document.getElementById('be-land').value = model.landCost || '';"
+    new_uiland = ("    document.getElementById('be-target-ppu').value = model.targetPPU || '';\n"
+                  + old_uiland)
+    if html.count(old_uiland) != 1:
+        sys.exit("updateUI be-land sync anchor not found uniquely")
+    html = html.replace(old_uiland, new_uiland, 1)
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:

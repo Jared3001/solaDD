@@ -384,8 +384,8 @@ body { flex-direction: column; }
                 <div class="panel-header"><span>Interactive Levers</span><span class="badge">Live</span></div>
 
                 <!-- MAX LAND PRICE DISPLAY (mechanism 1): read-only ceiling -->
-                <div class="maxland-box" id="maxland-box" title="The highest land price that still hits the $350K/unit all-in cost target. Buy at or below this and the deal pencils (dev spread >= 0); pay more and returns go negative.">
-                    <div class="maxland-label">Max Land Price <span class="maxland-sub">to pencil @ $350K/unit</span></div>
+                <div class="maxland-box" id="maxland-box" title="The highest land price that still hits the all-in cost-per-unit target. Buy at or below this and the deal pencils (dev spread >= 0); pay more and returns go negative. Change the target in the Backend tab (Hard Costs).">
+                    <div class="maxland-label">Max Land Price <span class="maxland-sub">to pencil @ <span id="maxland-target">$350K</span>/unit</span></div>
                     <div class="maxland-figs"><span class="maxland-val" id="maxland-val">&mdash;</span><span class="maxland-pu" id="maxland-pu"></span></div>
                 </div>
 
@@ -492,6 +492,7 @@ body { flex-direction: column; }
             <div class="backend-panel">
                 <h4>Hard Costs</h4>
                 <ul class="detail-list">
+                    <li title="The all-in cost-per-unit target that sets the Max Land Price ceiling on the Dashboard. Lower it to be more conservative; raise it to support a higher land price."><span>Target Cost / Unit <span style="color: var(--text-faint); font-size: 10px;">(max-land basis)</span></span><input type="number" step="5000" min="0" id="be-target-ppu" oninput="updateFromBackend()"></li>
                     <li><span>Land Acquisition</span><input type="number" id="be-land" oninput="updateFromBackend()"></li>
                     <li><span style="color: var(--text-muted); font-size: 11px;">Modular $/Unit · 1-BR</span><input type="number" id="be-mod1" oninput="updateFromBackend()" style="font-size: 11px;"></li>
                     <li><span style="color: var(--text-muted); font-size: 11px;">Modular $/Unit · 2-BR</span><input type="number" id="be-mod2" oninput="updateFromBackend()" style="font-size: 11px;"></li>
@@ -637,6 +638,7 @@ let model = {
     opexRatio: 0.32,
 
     // Costs
+    targetPPU: 350000,   // all-in cost/unit target -> sets the max supportable land ceiling
     landCost: 0,
     hardCostPerSf: 0,    // per GSF — display only, kept for chat compatibility (drives onsite cost)
     modCost1BR: 95000,   // modular price book (total construction $/unit by bed)
@@ -1404,6 +1406,7 @@ function updateUI(opts = {}) {
     document.getElementById('be-rg').innerText = fPct(model.rentGrowth);
     document.getElementById('be-opex').value = model.opexRatio || '';
 
+    document.getElementById('be-target-ppu').value = model.targetPPU || '';
     document.getElementById('be-land').value = model.landCost || '';
     document.getElementById('be-mod1').value = model.modCost1BR || '';
     document.getElementById('be-mod2').value = model.modCost2BR || '';
@@ -1952,7 +1955,7 @@ function loadDeal(m, units) {
         <div class="data-line"><span>3-Yr Rent Growth</span><span>${(m.rg3yr*100).toFixed(1)}%</span></div>
         <div class="data-line"><span>Hard Cost</span><span>$${m.hardCost}/GSF</span></div>
         <div class="data-line"><span>Market Land (asking)</span><span>$${m.landPerSf}/buildable SF</span></div>
-        <div class="data-line"><span>Modeled Land</span><span>max @ $350K/unit · see Backend</span></div>
+        <div class="data-line"><span>Modeled Land</span><span>max @ $${Math.round((model.targetPPU||350000)/1000)}K/unit · see Backend</span></div>
         <div class="data-line"><span>OpEx Ratio</span><span>${(m.opex*100).toFixed(0)}% of EGI</span></div>
         <div class="data-line"><span>Source</span><span>${provLabel}</span></div>
         ${provNote}
@@ -1987,9 +1990,9 @@ function loadDeal(m, units) {
         rentGrowth: m.rg3yr
     });
 
-    // Land defaults to the MAX supportable purchase price at $350K/unit all-in —
+    // Land defaults to the MAX supportable purchase price at the target $/unit all-in —
     // construction is fixed by the modular price book, so land is the lever.
-    try { const __rl = __residualLandForPPU(350000); if (__rl != null) { model.landCost = __rl; __maxLand = __rl; } } catch (e) {}
+    try { const __rl = __residualLandForPPU(model.targetPPU || 350000); if (__rl != null) { model.landCost = __rl; __maxLand = __rl; } } catch (e) {}
     snapshot = runUnderwriting(model);
 
     document.getElementById('projName').innerHTML = m.name;
@@ -2098,6 +2101,8 @@ function updateFromBackend() {
     model.rentPerUnit = parseFloat(document.getElementById('be-rent').value) || model.rentPerUnit;
     model.otherIncomePerUnit = parseFloat(document.getElementById('be-other').value) || model.otherIncomePerUnit;
     model.opexRatio = parseFloat(document.getElementById('be-opex').value) || model.opexRatio;
+    const __tppu = parseFloat(document.getElementById('be-target-ppu').value);
+    if (isFinite(__tppu) && __tppu > 0) model.targetPPU = Math.round(__tppu);
     model.landCost = parseFloat(document.getElementById('be-land').value) || model.landCost;
     model.modCost1BR = parseFloat(document.getElementById('be-mod1').value) || model.modCost1BR;
     model.modCost2BR = parseFloat(document.getElementById('be-mod2').value) || model.modCost2BR;
@@ -2136,6 +2141,8 @@ const fLandDollar = v => (v || 0).toLocaleString('en-US', { maximumFractionDigit
 function renderMaxLandDisplay() {
     const el = document.getElementById('maxland-val'); if (!el) return;
     const pu = document.getElementById('maxland-pu');
+    const tgt = document.getElementById('maxland-target');
+    if (tgt) tgt.textContent = '$' + Math.round((model.targetPPU || 350000) / 1000) + 'K';
     if (__maxLand == null || !model.units) { el.textContent = '\u2014'; if (pu) pu.textContent = __engineReady() ? '' : 'computing\u2026'; return; }
     el.textContent = fMoneyM(__maxLand);
     if (pu) pu.textContent = '$' + Math.round(__maxLand / model.units / 1000) + 'K/unit';
@@ -2632,7 +2639,7 @@ function scheduleEngine() {
     __engineTimer = setTimeout(() => {
         __engineKPIs = computeEngineReturns(model);
         applyEngineKPIs();
-        try { const __ml = __residualLandForPPU(350000); if (__ml != null) __maxLand = __ml; } catch (e) {}
+        try { const __ml = __residualLandForPPU(model.targetPPU || 350000); if (__ml != null) __maxLand = __ml; } catch (e) {}
         renderMaxLandDisplay();
         renderLandLever();
     }, 120);
