@@ -403,10 +403,10 @@ body { flex-direction: column; }
                 <div class="panel-header">
                     <span>Sensitivity Analysis</span>
                     <div class="sensi-tabs">
-                        <button class="sensi-tab active" data-sensi="returns" onclick="switchSensi('returns')">Returns</button>
+                        <button class="sensi-tab active" data-sensi="land" onclick="switchSensi('land')">Land × Cap</button>
+                        <button class="sensi-tab" data-sensi="returns" onclick="switchSensi('returns')">Returns</button>
                         <button class="sensi-tab" data-sensi="revenue" onclick="switchSensi('revenue')">Cost × Rent</button>
                         <button class="sensi-tab" data-sensi="finance" onclick="switchSensi('finance')">Financing</button>
-                        <button class="sensi-tab" data-sensi="land" onclick="switchSensi('land')">Land × Cap</button>
                     </div>
                 </div>
                 <div class="sensi-container" id="sensi-container">
@@ -1532,7 +1532,7 @@ function renderDeltas(res) {
 /* =====================================================================
    SENSITIVITY TABLES (3 matrices)
    ===================================================================== */
-let activeSensi = 'returns';
+let activeSensi = 'land';
 function switchSensi(t) {
     activeSensi = t;
     document.querySelectorAll('.sensi-tab').forEach(b => b.classList.toggle('active', b.dataset.sensi === t));

@@ -724,13 +724,17 @@ function loadDeal(m, units) {'''
     html = html.replace(old_landline, new_landline, 1)
 
     # ---- 9. LIVE "Land x Cap" sensitivity + tidy the dead Excel onsite table ---
-    # 9a. Add the tab (purchase price is the negotiation lever, so make it a grid).
-    old_tab = '<button class="sensi-tab" data-sensi="finance" onclick="switchSensi(\'finance\')">Financing</button>'
-    new_tab = (old_tab +
-               '\n                        <button class="sensi-tab" data-sensi="land" onclick="switchSensi(\'land\')">Land × Cap</button>')
+    # 9a. Add the tab FIRST + active (purchase price is the primary lever now).
+    old_tab = '<button class="sensi-tab active" data-sensi="returns" onclick="switchSensi(\'returns\')">Returns</button>'
+    new_tab = ('<button class="sensi-tab active" data-sensi="land" onclick="switchSensi(\'land\')">Land × Cap</button>\n'
+               '                        <button class="sensi-tab" data-sensi="returns" onclick="switchSensi(\'returns\')">Returns</button>')
     if html.count(old_tab) != 1:
-        sys.exit("sensi-tab finance button anchor not found uniquely")
+        sys.exit("sensi-tab returns button anchor not found uniquely")
     html = html.replace(old_tab, new_tab, 1)
+    # Default the active sensitivity view to Land × Cap.
+    if html.count("let activeSensi = 'returns';") != 1:
+        sys.exit("activeSensi default anchor not found uniquely")
+    html = html.replace("let activeSensi = 'returns';", "let activeSensi = 'land';", 1)
 
     # 9b. Engine branch: Levered IRR over Land $/unit (vary Dev Budget!G7) x Exit
     #     Cap (vary Dashboard!J5). The in-browser engine varies cells across sheets
