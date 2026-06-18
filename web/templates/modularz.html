@@ -225,6 +225,8 @@ body { flex-direction: column; }
 .site-nav-out { margin-left: auto; color: #cdd6e6; text-decoration: none; font-size: 13px; }
 .site-nav-out:hover { color: #fff; text-decoration: underline; }
 .sensi-note { font-size: 10.5px; color: var(--text-muted); margin-top: 8px; font-style: italic; }
+#affordability-panel select { font-family: var(--font-sans); font-size: 11.5px; border: 1px solid var(--border-strong); border-radius: 4px; padding: 2px 5px; background: var(--bg-subtle); color: var(--text-main); }
+#affordability-panel .detail-list input { width: 88px; }
 </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <!-- Formula engine: runs the proforma's own formulas in-browser so the dashboard
@@ -515,6 +517,29 @@ body { flex-direction: column; }
                 </ul>
             </div>
 
+            <div class="backend-panel" id="affordability-panel">
+                <h4>Affordability — CTCAC AMI Rents</h4>
+                <ul class="detail-list">
+                    <li><span>County (from ZIP)</span><span id="aff-county">—</span></li>
+                    <li><span>AMI tier</span><select id="aff-tier" onchange="updateAffordability()">
+                        <option value="market">Market (no cap)</option>
+                        <option value="110">110% AMI (approx)</option>
+                        <option value="100">100% AMI</option>
+                        <option value="80" selected>80% AMI</option>
+                        <option value="60">60% AMI</option>
+                        <option value="50">50% AMI</option>
+                        <option value="40">40% AMI</option>
+                        <option value="30">30% AMI</option>
+                    </select></li>
+                    <li><span>Utility allowance /unit/mo</span><input type="number" id="aff-util" min="0" value="0" oninput="updateAffordability()"></li>
+                    <li><span>1-BR cap (net)</span><span id="aff-br1">—</span></li>
+                    <li><span>2-BR cap (net)</span><span id="aff-br2">—</span></li>
+                    <li><span>3-BR cap (net)</span><span id="aff-br3">—</span></li>
+                    <li><span>Blended cap</span><span id="aff-blended">—</span></li>
+                </ul>
+                <p style="font-size: 10.5px; color: var(--text-muted); margin-top: 6px;">CTCAC 2025 MTSP gross caps, netted by the utility allowance. Preview only — not yet wired into the proforma (pending Rent Roll inputs).</p>
+            </div>
+
             <div class="backend-panel" style="background: var(--bg-deep); color: white; border-color: var(--bg-deep);">
                 <h4 style="color: #d1fae5; border-color: rgba(255,255,255,0.15);">Need to change something?</h4>
                 <p style="font-size: 11.5px; line-height: 1.5; color: #d1d5db; margin-top: 4px;">
@@ -543,6 +568,8 @@ body { flex-direction: column; }
 </main>
 </div><!-- /z-shell -->
 
+<script src="/static/hud_rents.js"></script>
+<script src="/static/ca_zip_county.js"></script>
 <script>
 const GEMINI_API_KEY = "{{ gemini_key }}";
 /* =====================================================================
@@ -1417,6 +1444,42 @@ function updateUI(opts = {}) {
 
     // Sensitivity
     buildSensiTable();
+    try { updateAffordability(); } catch (e) {}
+}
+
+/* ===== Affordability — CTCAC AMI rents (data: window.HUD_RENTS + window.CA_ZIP_COUNTY) ===== */
+function affResolveFips(model) {
+    const m = (model.address || '').match(/\b(9\d{4})\b/);          // ZIP from the deal address
+    if (m && window.CA_ZIP_COUNTY && CA_ZIP_COUNTY[m[1]]) return CA_ZIP_COUNTY[m[1]];
+    if (model.countyFips && window.HUD_RENTS && HUD_RENTS.counties[model.countyFips]) return model.countyFips;
+    return null;
+}
+function updateAffordability() {
+    const panel = document.getElementById('affordability-panel');
+    if (!panel || typeof window.HUD_RENTS === 'undefined') return;
+    const tierSel = document.getElementById('aff-tier');
+    const utilEl = document.getElementById('aff-util');
+    const tier = tierSel ? tierSel.value : '80';
+    const util = utilEl ? (parseFloat(utilEl.value) || 0) : 0;
+    const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+    const fips = affResolveFips(model);
+    const c = fips ? HUD_RENTS.counties[fips] : null;
+    set('aff-county', c ? c.county : (model.address ? 'Outside CA coverage' : '—'));
+    if (!c || tier === 'market') {
+        ['aff-br1', 'aff-br2', 'aff-br3'].forEach(id => set(id, '—'));
+        set('aff-blended', (c && tier === 'market') ? 'Market (uses comp rent)' : '—');
+        return;
+    }
+    const r = c.rents[tier];
+    if (!r) { ['aff-br1', 'aff-br2', 'aff-br3', 'aff-blended'].forEach(id => set(id, '—')); return; }
+    const net = v => Math.max(0, Math.round(v - util));
+    set('aff-br1', fMoney(net(r.br1)));
+    set('aff-br2', fMoney(net(r.br2)));
+    set('aff-br3', fMoney(net(r.br3)));
+    const u1 = model.units1BR || model.units || 0, u2 = model.units2BR || 0, u3 = model.units3BR || 0;
+    const tot = (u1 + u2 + u3) || 1;
+    const blended = Math.round((u1 * net(r.br1) + u2 * net(r.br2) + u3 * net(r.br3)) / tot);
+    set('aff-blended', fMoney(blended) + ' /unit/mo');
 }
 
 function renderDeltas(res) {

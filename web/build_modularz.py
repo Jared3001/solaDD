@@ -168,6 +168,8 @@ body { flex-direction: column; }
 .site-nav-out { margin-left: auto; color: #cdd6e6; text-decoration: none; font-size: 13px; }
 .site-nav-out:hover { color: #fff; text-decoration: underline; }
 .sensi-note { font-size: 10.5px; color: var(--text-muted); margin-top: 8px; font-style: italic; }
+#affordability-panel select { font-family: var(--font-sans); font-size: 11.5px; border: 1px solid var(--border-strong); border-radius: 4px; padding: 2px 5px; background: var(--bg-subtle); color: var(--text-main); }
+#affordability-panel .detail-list input { width: 88px; }
 </style>'''
     html, n = re.subn(r"</style>", nav_css, html, count=1)
     if n != 1:
@@ -463,6 +465,95 @@ function buildSensiTableJS() {'''
     if html.count(old_chat) != 1:
         sys.exit("chat IRR block not found uniquely")
     html = html.replace(old_chat, new_chat, 1)
+
+    # ---- 7. AFFORDABILITY (CTCAC AMI rents) preview — Workstreams B/C/E ------
+    # 7a. Load the generated data layers (rents + ZIP->county crosswalk) before
+    #     the main script. Served from Flask's /static.
+    scripts = ('<script src="/static/hud_rents.js"></script>\n'
+               '<script src="/static/ca_zip_county.js"></script>\n'
+               '<script>\nconst GEMINI_API_KEY = "{{ gemini_key }}";')
+    anchor = '<script>\nconst GEMINI_API_KEY = "{{ gemini_key }}";'
+    if html.count(anchor) != 1:
+        sys.exit("affordability script-tag anchor not found uniquely")
+    html = html.replace(anchor, scripts, 1)
+
+    # 7b. Affordability panel in the Backend tab (before the dark help panel).
+    aff_panel = '''<div class="backend-panel" id="affordability-panel">
+                <h4>Affordability — CTCAC AMI Rents</h4>
+                <ul class="detail-list">
+                    <li><span>County (from ZIP)</span><span id="aff-county">—</span></li>
+                    <li><span>AMI tier</span><select id="aff-tier" onchange="updateAffordability()">
+                        <option value="market">Market (no cap)</option>
+                        <option value="110">110% AMI (approx)</option>
+                        <option value="100">100% AMI</option>
+                        <option value="80" selected>80% AMI</option>
+                        <option value="60">60% AMI</option>
+                        <option value="50">50% AMI</option>
+                        <option value="40">40% AMI</option>
+                        <option value="30">30% AMI</option>
+                    </select></li>
+                    <li><span>Utility allowance /unit/mo</span><input type="number" id="aff-util" min="0" value="0" oninput="updateAffordability()"></li>
+                    <li><span>1-BR cap (net)</span><span id="aff-br1">—</span></li>
+                    <li><span>2-BR cap (net)</span><span id="aff-br2">—</span></li>
+                    <li><span>3-BR cap (net)</span><span id="aff-br3">—</span></li>
+                    <li><span>Blended cap</span><span id="aff-blended">—</span></li>
+                </ul>
+                <p style="font-size: 10.5px; color: var(--text-muted); margin-top: 6px;">CTCAC 2025 MTSP gross caps, netted by the utility allowance. Preview only — not yet wired into the proforma (pending Rent Roll inputs).</p>
+            </div>
+
+            <div class="backend-panel" style="background: var(--bg-deep); color: white; border-color: var(--bg-deep);">'''
+    dark_anchor = '<div class="backend-panel" style="background: var(--bg-deep); color: white; border-color: var(--bg-deep);">'
+    if html.count(dark_anchor) != 1:
+        sys.exit("affordability panel anchor not found uniquely")
+    html = html.replace(dark_anchor, aff_panel, 1)
+
+    # 7c. Affordability logic (uses window.HUD_RENTS + window.CA_ZIP_COUNTY).
+    aff_js = '''/* ===== Affordability — CTCAC AMI rents (data: window.HUD_RENTS + window.CA_ZIP_COUNTY) ===== */
+function affResolveFips(model) {
+    const m = (model.address || '').match(/\\b(9\\d{4})\\b/);          // ZIP from the deal address
+    if (m && window.CA_ZIP_COUNTY && CA_ZIP_COUNTY[m[1]]) return CA_ZIP_COUNTY[m[1]];
+    if (model.countyFips && window.HUD_RENTS && HUD_RENTS.counties[model.countyFips]) return model.countyFips;
+    return null;
+}
+function updateAffordability() {
+    const panel = document.getElementById('affordability-panel');
+    if (!panel || typeof window.HUD_RENTS === 'undefined') return;
+    const tierSel = document.getElementById('aff-tier');
+    const utilEl = document.getElementById('aff-util');
+    const tier = tierSel ? tierSel.value : '80';
+    const util = utilEl ? (parseFloat(utilEl.value) || 0) : 0;
+    const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+    const fips = affResolveFips(model);
+    const c = fips ? HUD_RENTS.counties[fips] : null;
+    set('aff-county', c ? c.county : (model.address ? 'Outside CA coverage' : '—'));
+    if (!c || tier === 'market') {
+        ['aff-br1', 'aff-br2', 'aff-br3'].forEach(id => set(id, '—'));
+        set('aff-blended', (c && tier === 'market') ? 'Market (uses comp rent)' : '—');
+        return;
+    }
+    const r = c.rents[tier];
+    if (!r) { ['aff-br1', 'aff-br2', 'aff-br3', 'aff-blended'].forEach(id => set(id, '—')); return; }
+    const net = v => Math.max(0, Math.round(v - util));
+    set('aff-br1', fMoney(net(r.br1)));
+    set('aff-br2', fMoney(net(r.br2)));
+    set('aff-br3', fMoney(net(r.br3)));
+    const u1 = model.units1BR || model.units || 0, u2 = model.units2BR || 0, u3 = model.units3BR || 0;
+    const tot = (u1 + u2 + u3) || 1;
+    const blended = Math.round((u1 * net(r.br1) + u2 * net(r.br2) + u3 * net(r.br3)) / tot);
+    set('aff-blended', fMoney(blended) + ' /unit/mo');
+}
+
+function renderDeltas(res) {'''
+    if html.count("function renderDeltas(res) {") != 1:
+        sys.exit("renderDeltas anchor not found uniquely")
+    html = html.replace("function renderDeltas(res) {", aff_js, 1)
+
+    # 7d. Refresh the panel on every model change (central updateUI hook).
+    old_hook = "    // Sensitivity\n    buildSensiTable();\n}"
+    new_hook = "    // Sensitivity\n    buildSensiTable();\n    try { updateAffordability(); } catch (e) {}\n}"
+    if html.count(old_hook) != 1:
+        sys.exit("updateUI hook anchor not found uniquely")
+    html = html.replace(old_hook, new_hook, 1)
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:
