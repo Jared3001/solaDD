@@ -554,6 +554,19 @@ function esc(v) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 function fmt(n) { return Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 }); }
+// Render a stored timestamp in Pacific time on a 12-hour clock (e.g. "Jun 22,
+// 2026, 11:38 AM PDT"). Stored stamps are UTC; legacy naive ones lack an offset,
+// so assume UTC for those too (the server runs in UTC).
+function fmtWhen(iso) {
+  if (!iso) return "";
+  const hasTz = /[zZ]$|[+-]\d\d:?\d\d$/.test(iso);
+  const d = new Date(hasTz ? iso : iso + "Z");
+  if (isNaN(d.getTime())) return iso.replace("T", " ");
+  return d.toLocaleString("en-US", {
+    timeZone: "America/Los_Angeles", month: "short", day: "numeric", year: "numeric",
+    hour: "numeric", minute: "2-digit", hour12: true, timeZoneName: "short",
+  });
+}
 
 // ---------- time-saved metric ----------
 async function loadStats() {
@@ -581,7 +594,7 @@ async function loadRecent() {
         <td class="rc-site">${esc(run.label)}</td>
         <td>${run.kind === "assemblage" ? "Assemblage" : run.kind === "underwrite" ? "Model" : "Single"}</td>
         <td>${run.fields}${run.flags ? ` <span class="rc-flag" title="${run.flags} field(s) need manual verification">⚑ ${run.flags}</span>` : ""}</td>
-        <td class="rc-when">${esc((run.finished || "").replace("T", " "))}</td>
+        <td class="rc-when">${esc(fmtWhen(run.finished))}</td>
         <td class="rc-actions">
           ${run.can_model ? `<button class="rc-gen" type="button" data-job="${esc(run.id)}" title="Build Stick + Modular pro-forma from this checklist">→ Financial model</button>` : ""}
           ${run.downloadable ? `<a class="rc-dl" href="/api/download/${run.id}">Download</a>` : ""}

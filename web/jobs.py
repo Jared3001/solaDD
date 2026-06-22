@@ -176,7 +176,9 @@ _LANDING = {"VERIFIED", "JUDGMENT", "NA", "COMPUTED", "OM-SOURCED"}
 
 
 def _now():
-    return datetime.datetime.now().isoformat(timespec="seconds")
+    # timezone-aware UTC so timestamps are unambiguous; the UI renders them in
+    # Pacific on a 12-hour clock (see app.js fmtWhen).
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
 
 def _jsonable(v):
