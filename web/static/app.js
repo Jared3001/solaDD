@@ -93,11 +93,114 @@ $("#recent-body").addEventListener("click", (e) => {
   if (btn && btn.dataset.job) genModelFrom(btn.dataset.job);
 });
 
-function genModelFrom(jobId) {
-  launch({ method: "POST", headers: { "Content-Type": "application/json" },
-           body: JSON.stringify({ mode: "underwrite", from_job: jobId }) });
-  $("#status-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+// Open the Review & Edit step seeded with the auto-derived model inputs; on
+// confirm it auto-chains into the underwrite run with the analyst's overrides.
+async function genModelFrom(jobId) {
+  showError(null);
+  try {
+    const res = await fetch(`/api/underwrite/intake/${jobId}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not load model inputs.");
+    openModelReview(jobId, data);
+  } catch (err) {
+    showError(err.message);
+  }
 }
+
+function openModelReview(jobId, intake) {
+  const o = intake.options;
+  ReviewEditor.open({
+    subtitle: `${intake.label} — adjust the automated inputs, preview, then generate. Defaults are the DD answers.`,
+    confirmLabel: "Generate Stick + Modular models",
+    previewNote: "Derived live from the inputs (same rules the exporter uses). Acquisition price, residential stories, BIPOC & prevailing wage stay analyst-entered in Excel.",
+    values: intake.values,
+    fields: [
+      { id: "deal_name", label: "Deal name", type: "text" },
+      { id: "county", label: "County", type: "text" },
+      { id: "pha", label: "Public Housing Authority", type: "select", options: o.pha },
+      { id: "qct_dda", label: "QCT / DDA", type: "select", options: o.qct_dda },
+      { id: "resource", label: "Resource area", type: "select", options: o.resource, help: "drives product type & bedroom mix" },
+      { id: "neighborhood_change", label: "Neighborhood change area", type: "select", options: o.neighborhood_change, help: "drives CRA eligibility" },
+      { id: "land_sf", label: "Land area (SF)", type: "number" },
+    ],
+    derive: deriveModelPreview,
+  }, (values) => {
+    launch({ method: "POST", headers: { "Content-Type": "application/json" },
+             body: JSON.stringify({ mode: "underwrite", from_job: jobId, overrides: values }) });
+  });
+}
+
+// JS mirror of uw_logic's derive rules — live preview only; Python writes the file.
+function deriveModelPreview(v) {
+  const lf = v.resource === "High" || v.resource === "Highest";
+  const cra = (String(v.neighborhood_change).toLowerCase() !== "yes" && !lf) ? "Yes" : "No";
+  const mix = lf ? "0% Studio · 50% 1B · 25% 2B · 25% 3B" : "100% 1B";
+  const sf = (v.land_sf != null && v.land_sf !== "") ? fmt(v.land_sf) : "—";
+  return [
+    { label: "Project (B2)", value: v.deal_name || "—" },
+    { label: "County (C3)", value: v.county || "—" },
+    { label: "PHA (C4)", value: v.pha || "—" },
+    { label: "QCT/DDA (C5)", value: v.qct_dda || "—" },
+    { label: "Resource (C6)", value: v.resource || "—" },
+    { label: "Neighborhood change (C7)", value: v.neighborhood_change || "—" },
+    { label: "Land SF (C12)", value: sf },
+    { label: "→ Product", value: lf ? "Large Family" : "Standard (1B)" },
+    { label: "→ CRA (C8)", value: cra },
+    { label: "→ Bedroom mix", value: mix },
+    { label: "→ AMI mix", value: "10% @30% · 10% @50% · 80% @60%" },
+  ];
+}
+
+// ---------- reusable Review & Edit step ----------
+// schema = { subtitle, confirmLabel, previewNote, values:{}, fields:[{id,label,type,options,help}], derive:(values)->[{label,value}] }
+const ReviewEditor = {
+  schema: null, values: null, onConfirm: null,
+  open(schema, onConfirm) {
+    this.schema = schema;
+    this.values = { ...schema.values };
+    this.onConfirm = onConfirm;
+    $("#review-sub").textContent = schema.subtitle || "";
+    $("#review-go").textContent = schema.confirmLabel || "Generate";
+    $("#review-error").classList.add("hidden");
+    this.renderInputs();
+    this.renderPreview();
+    $("#review-panel").classList.remove("hidden");
+    $("#review-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+  },
+  close() { $("#review-panel").classList.add("hidden"); },
+  renderInputs() {
+    $("#review-inputs").innerHTML = this.schema.fields.map(f => {
+      const v = this.values[f.id] ?? "";
+      let ctrl;
+      if (f.type === "select") {
+        ctrl = `<select data-fid="${esc(f.id)}">${f.options.map(opt =>
+          `<option value="${esc(opt)}"${String(opt) === String(v) ? " selected" : ""}>${esc(opt)}</option>`).join("")}</select>`;
+      } else {
+        ctrl = `<input type="${f.type === "number" ? "number" : "text"}" data-fid="${esc(f.id)}" value="${esc(v)}">`;
+      }
+      return `<div class="rv-field"><label>${esc(f.label)}</label>${ctrl}${f.help ? `<span class="rv-help">${esc(f.help)}</span>` : ""}</div>`;
+    }).join("");
+    $("#review-inputs").querySelectorAll("[data-fid]").forEach(el => {
+      el.addEventListener("input", () => {
+        const f = this.schema.fields.find(x => x.id === el.dataset.fid);
+        this.values[el.dataset.fid] = (f.type === "number")
+          ? (el.value === "" ? null : Number(el.value)) : el.value;
+        this.renderPreview();
+      });
+    });
+  },
+  renderPreview() {
+    const rows = this.schema.derive(this.values);
+    $("#review-preview").innerHTML = `<h3 class="section-head">Model will use</h3>`
+      + `<table>${rows.map(r => `<tr><td class="col-field">${esc(r.label)}</td><td class="col-answer">${esc(r.value)}</td></tr>`).join("")}</table>`
+      + (this.schema.previewNote ? `<p class="hint">${esc(this.schema.previewNote)}</p>` : "");
+  },
+};
+$("#review-cancel").addEventListener("click", () => ReviewEditor.close());
+$("#review-go").addEventListener("click", () => {
+  ReviewEditor.close();
+  if (ReviewEditor.onConfirm) ReviewEditor.onConfirm(ReviewEditor.values);
+});
 
 // ---------- polling ----------
 function poll(jobId) {
@@ -270,6 +373,7 @@ function resetStatus() {
   $("#parcels").innerHTML = "";
   $("#uw-panel").classList.add("hidden");
   $("#uw-body").innerHTML = "";
+  $("#review-panel").classList.add("hidden");
   $("#gen-model").classList.add("hidden");
   $("#download").classList.add("hidden");
   $("#matched").textContent = "";

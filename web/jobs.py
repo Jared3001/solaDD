@@ -500,10 +500,16 @@ def run_underwrite(job):
     job["phase"] = "Reading the DD checklist…"
     dd = _underwrite.read_dd(dd_path)
 
+    # Review/edit step: fold any analyst overrides into the DD before projecting.
+    import uw_logic as _uwl
+    deal_override = None
+    if inp.get("overrides"):
+        dd, deal_override = _uwl.apply_overrides(dd, inp["overrides"])
+
     job["phase"] = "Writing the Stick + Modular pro-forma models (preserving macros)…"
     out_dir = RUN_DIR / f"{job['id']}_models"
     paths, meta = _underwrite.export(dd, str(_underwrite.DEFAULT_TEMPLATE), out_dir,
-                                     deal_name=inp.get("name") or None)
+                                     deal_name=deal_override or inp.get("name") or None)
     deal = paths[0].name.split(" — ")[0]
     job["label"] = f"{deal} — financial model"
 
@@ -528,6 +534,24 @@ def run_underwrite(job):
     job["file"] = str(zip_path)
     job["filename"] = f"{_safe_name(deal)}_models.zip"
     job["phase"] = "Complete"
+
+
+# --------------------------------------------------------------------------- #
+# review/edit step — editable model inputs from a completed DD run
+# --------------------------------------------------------------------------- #
+def underwrite_intake(jid):
+    """The editable intake (defaults + options + derived preview) for a DD job's
+    financial model. Raises ValueError if the source checklist is unavailable."""
+    job = get_job(jid)
+    if not job or not job.get("file") or not os.path.exists(job["file"]):
+        raise ValueError("Source checklist not found (it may have expired) — re-run the DD.")
+    if job["kind"] not in ("single", "assemblage"):
+        raise ValueError("Only a DD checklist can seed a financial model.")
+    import uw_logic as _uwl
+    dd = _underwrite.read_dd(Path(job["file"]))
+    payload = _uwl.intake(dd)
+    payload["label"] = job.get("label") or jid
+    return payload
 
 
 # --------------------------------------------------------------------------- #

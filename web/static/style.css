@@ -305,3 +305,24 @@ h1, .brand-mark, .tab, .run-btn, label, th, .phase, .kicker {
 .src-chip:hover { border-color: var(--mid); background: #f4f7fb; color: var(--navy); }
 
 .hidden { display: none !important; }
+
+/* ---------- review & edit step (reusable) ---------- */
+.review-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
+.review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+@media (max-width: 720px) { .review-grid { grid-template-columns: 1fr; } }
+.rv-field { margin-bottom: 14px; }
+.rv-field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--navy); }
+.rv-field input, .rv-field select {
+  width: 100%; padding: 9px 10px; font-size: 14px;
+  border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink);
+}
+.rv-field input:focus, .rv-field select:focus { outline: 0; border-color: var(--mid); }
+.rv-help { display: block; font-size: 12px; color: var(--gray); margin-top: 4px; }
+.review-preview {
+  background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
+  border-left: 4px solid var(--amber); padding: 14px 16px;
+}
+.review-preview table { width: 100%; border-collapse: collapse; }
+.review-preview td { padding: 5px 0; font-size: 13px; border-bottom: 1px solid var(--line); }
+.review-preview td.col-answer { text-align: right; font-weight: 600; color: var(--navy); }
+.review-preview .hint { margin-top: 10px; }

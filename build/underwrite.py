@@ -71,6 +71,7 @@ def export(dd, template_path, out_dir, deal_name=None):
     for method in METHODS:
         wb = load_workbook(template_path, keep_vba=True)   # preserves macros + LAMBDAs
         cells = {**base, **uw_logic.method_cells(method)}
+        cells[("Pro_Forma", "B2")] = deal                  # keep B2 == filename/deal name (honors a review-step edit)
         for (sheet, ref), val in cells.items():
             wb[sheet][ref] = val
         out = out_dir / f"{deal} — {method}.xlsm"        # em dash per Part C spec

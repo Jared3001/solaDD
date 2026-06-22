@@ -83,6 +83,9 @@ def pha(pha_text: str, county_text: str = "", city_text: str = "") -> tuple:
     Returns (label, confident). When nothing matches we fall back to the
     county/city short name and mark it not-confident so the caller can flag it.
     """
+    # an explicit canonical pick (e.g. from the review/edit step) is authoritative
+    if (pha_text or "").strip() in PHA_CANONICAL:
+        return (pha_text or "").strip(), True
     t = (pha_text or "").lower()
     has = lambda *ws: all(w in t for w in ws)
     # city authorities first (more specific than the county catch-alls)
@@ -202,3 +205,70 @@ def _num(v):
         return None
     s = "".join(ch for ch in str(v) if ch.isdigit() or ch == ".")
     return float(s) if s else None
+
+
+# --------------------------------------------------------------------------- #
+# Review & edit step — the editable intake the web front end shows BEFORE export.
+# `intake(dd)` returns the editable defaults + the select vocabularies + a
+# live-preview of the derived assumptions. The browser edits `values`, recomputes
+# `derived` in JS (mirror of the rules above), and posts `values` back as
+# overrides; `apply_overrides()` folds them into the dd dict before base_cells().
+# --------------------------------------------------------------------------- #
+INTAKE_OPTIONS = {
+    "resource": ["Low", "Medium", "High", "Highest"],
+    "qct_dda": ["QCT", "DDA", "None"],
+    "neighborhood_change": ["Yes", "No"],
+    "pha": PHA_CANONICAL,
+}
+
+
+def derived_preview(values: dict) -> dict:
+    """The assumptions the model derives from the editable inputs (for preview)."""
+    res = resource(values.get("resource", ""))
+    lf = is_large_family(res)
+    mix = bedroom_mix(lf)
+    return {
+        "product": "Large Family" if lf else "Standard (1B)",
+        "cra": cra(values.get("neighborhood_change"), lf),
+        "construction_type": "Type I / III by stories (formula)",
+        "bedroom_mix": ("0% Studio · 50% 1B · 25% 2B · 25% 3B" if lf
+                        else "100% 1B"),
+        "ami_mix": "10% @30% · 10% @50% · 80% @60%",
+        "_mix_cells": mix,
+    }
+
+
+def intake(dd: dict) -> dict:
+    """Editable defaults + options + derived preview for the review/edit step."""
+    pha_label, _ = pha(dd.get("pha", ""), dd.get("county", ""), dd.get("city_jurisdiction", ""))
+    values = {
+        "deal_name": project_name(dd.get("address", "")),
+        "county": county(dd.get("county", "")),
+        "pha": pha_label,
+        "qct_dda": qct_dda(dd.get("qct"), dd.get("dda")),
+        "resource": resource(dd.get("resource_area", "")),
+        "neighborhood_change": "Yes" if _yes(dd.get("neighborhood_change_area")) else "No",
+        "land_sf": _num(dd.get("land_sf")),
+    }
+    return {"values": values, "options": INTAKE_OPTIONS, "derived": derived_preview(values)}
+
+
+def apply_overrides(dd: dict, ov: dict) -> tuple:
+    """Fold edited review-step values back into a DD dict. Returns (dd, deal_name)."""
+    dd = dict(dd or {})
+    ov = ov or {}
+    if ov.get("county") is not None:
+        dd["county"] = ov["county"]
+    if ov.get("pha") is not None:
+        dd["pha"] = ov["pha"]
+    if ov.get("resource") is not None:
+        dd["resource_area"] = ov["resource"]
+    if ov.get("neighborhood_change") is not None:
+        dd["neighborhood_change_area"] = ov["neighborhood_change"]
+    if ov.get("land_sf") not in (None, ""):
+        dd["land_sf"] = ov["land_sf"]
+    if ov.get("qct_dda") is not None:
+        v = ov["qct_dda"]
+        dd["qct"] = "Yes" if v == "QCT" else "No"
+        dd["dda"] = "Yes" if v == "DDA" else "No"
+    return dd, (ov.get("deal_name") or None)

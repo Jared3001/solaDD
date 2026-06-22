@@ -149,9 +149,30 @@ def api_run():
             payload["from_job"] = data.get("from_job")
         else:
             return jsonify({"error": "Upload a DD checklist (.xlsx), or generate from a completed run."}), 400
+        # Review/edit step (optional): analyst overrides of the model inputs.
+        ov = data.get("overrides")
+        if isinstance(ov, str) and ov:
+            import json as _json
+            try:
+                ov = _json.loads(ov)
+            except ValueError:
+                ov = None
+        if isinstance(ov, dict) and ov:
+            payload["overrides"] = ov
         jid = jobs.create_job("underwrite", payload)
         return jsonify({"job_id": jid})
     return jsonify({"error": "Unknown mode."}), 400
+
+
+@app.get("/api/underwrite/intake/<jid>")
+@login_required
+def api_underwrite_intake(jid):
+    # Editable model inputs (defaults + options + derived preview) for the
+    # review/edit step before generating the Stick + Modular models.
+    try:
+        return jsonify(jobs.underwrite_intake(jid))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
 
 
 @app.get("/api/stats")
