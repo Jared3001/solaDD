@@ -537,6 +537,89 @@ def run_underwrite(job):
 
 
 # --------------------------------------------------------------------------- #
+# rent comps — shortlist (run) -> review/edit matrix -> formatted CTCAC grid
+# --------------------------------------------------------------------------- #
+def run_comps(job):
+    import comps as _comps
+    inp = job["input"]
+    addr = (inp.get("address") or "").strip()
+    beds = inp.get("beds") or [0, 1, 2]
+    demo = not os.environ.get("RENTCAST_API_KEY")
+    job["phase"] = ("Demo data (no RentCast key set) — " if demo else "") + \
+                   f"Geocoding subject and shortlisting comps for beds {beds}…"
+    geo, by_bed = _comps.collect_comps(addr, beds, _comps.rentcast.DEFAULT_RADIUS_MI,
+                                       inp.get("top", 4), demo=demo, use_avm=not demo)
+    job["geo"] = {"matched_address": geo["matched_address"],
+                  "lat": round(geo["lat"], 6), "lon": round(geo["lon"], 6)}
+    job["label"] = geo["matched_address"] + " — rent comps"
+    # keep the rollup records for the editor + grid write
+    job["comps_data"] = {b: payload["comps"] for b, payload in by_bed.items()}
+    n = sum(len(v) for v in job["comps_data"].values())
+    job["total"] = job["completed"] = n
+    job["phase"] = f"Shortlisted {n} comp(s) across {len(beds)} bed type(s). Open the editor to adjust."
+
+
+def comps_intake(jid):
+    """Subject + comp rows + the adjustment ruleset for the comp review/edit matrix."""
+    job = get_job(jid)
+    if not job or job.get("kind") != "comps" or not job.get("comps_data"):
+        raise ValueError("Comp run not found (it may have expired) — re-run the comps.")
+    import comp_adjust as CA
+    ruleset = {
+        "age_per_year": CA.AGE_PER_YEAR, "size_rate_fraction": CA.SIZE_RATE_FRACTION,
+        "guardrail": CA.GUARDRAIL,
+        "amenity_labels": CA.AMENITY_LABELS,
+        "amenity_values": {l: CA.amenity_value(l) for l in CA.AMENITY_LABELS},
+        "utility_labels": CA.UTILITY_LABELS, "utility_values": CA.UTILITY_VALUES,
+    }
+    beds = []
+    for b, rows in sorted(job["comps_data"].items()):
+        beds.append({"bed": b,
+                     "comps": [{"address": c.get("address"), "city": c.get("city"),
+                                "distance_mi": c.get("distance_mi"),
+                                "sf": c.get("unit_size_sf"), "rent": c.get("base_rent"),
+                                "year": c.get("year_built"), "baths": c.get("bathrooms")}
+                               for c in rows]})
+    return {"label": job.get("label") or jid, "geo": job.get("geo"),
+            "beds": beds, "ruleset": ruleset}
+
+
+def run_comps_grid(job):
+    """Write the formatted CTCAC grid from the editor's edited subject + comp chars."""
+    import comps as _comps
+    inp = job["input"]
+    prior = get_job(inp.get("from_job") or "")
+    geo = (prior.get("geo") if prior else None) or {"matched_address": inp.get("address") or "Subject"}
+    grid = inp.get("grid") or {}     # {bed: {subject:{...}, comps:[{...}]}}
+    by_bed, subjects = {}, {}
+    for bed_str, data in grid.items():
+        b = int(bed_str)
+        comps_list = [{"address": c.get("address"), "city": c.get("city"),
+                       "distance_mi": c.get("distance_mi"), "unit_size_sf": c.get("sf"),
+                       "base_rent": c.get("rent"), "value_ratio": (round(c["rent"] / c["sf"], 2)
+                       if c.get("rent") and c.get("sf") else None), "bedrooms": b,
+                       "bathrooms": c.get("baths"), "year_built": c.get("year"),
+                       "_amenities": c.get("amenities", {}), "_utilities": c.get("utilities", {})}
+                      for c in data.get("comps", [])]
+        by_bed[b] = {"comps": comps_list, "estimate": None}
+        s = data.get("subject", {})
+        subjects[b] = {"sf": s.get("sf"), "rent": s.get("rent"), "year": s.get("year"),
+                       "baths": s.get("baths"), "city": s.get("city"), "m_or_l": "M",
+                       "amenities": s.get("amenities", {}), "utilities": s.get("utilities", {})}
+    # carry comp amenity/utility chars into the engine via the writer's ecomps map
+    _orig = _comps.write_ctcac_grid
+    out_path = RUN_DIR / f"{job['id']}.xlsx"
+    job["phase"] = "Writing the formatted CTCAC rent-comp grid…"
+    _comps.write_ctcac_grid(geo, by_bed, str(out_path), subjects,
+                            comp_chars={b: [{"amenities": c["_amenities"], "utilities": c["_utilities"]}
+                                            for c in by_bed[b]["comps"]] for b in by_bed})
+    job["file"] = str(out_path)
+    job["filename"] = _safe_name(geo["matched_address"]) + " — rent comp grid.xlsx"
+    job["total"] = job["completed"] = 1
+    job["phase"] = "Complete"
+
+
+# --------------------------------------------------------------------------- #
 # review/edit step — editable model inputs from a completed DD run
 # --------------------------------------------------------------------------- #
 def underwrite_intake(jid):
@@ -702,7 +785,8 @@ def create_job(kind, payload):
     return jid
 
 
-_RUNNERS = {"single": run_single, "assemblage": run_assemblage, "underwrite": run_underwrite}
+_RUNNERS = {"single": run_single, "assemblage": run_assemblage, "underwrite": run_underwrite,
+            "comps": run_comps, "comps_grid": run_comps_grid}
 
 
 def _run(job):

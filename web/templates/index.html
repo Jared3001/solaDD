@@ -41,6 +41,7 @@
         <button class="tab active" data-mode="single" role="tab">Single address</button>
         <button class="tab" data-mode="assemblage" role="tab">Block assemblage (APNs)</button>
         <button class="tab" data-mode="underwrite" role="tab">Financial model</button>
+        <button class="tab" data-mode="comps" role="tab">Rent comps</button>
         <button class="tab" data-mode="sources" role="tab">Sources</button>
       </div>
 
@@ -70,6 +71,20 @@
 
           <label for="uw-name" class="om-label">Deal name <span class="om-opt">(optional)</span></label>
           <input type="text" id="uw-name" name="name" placeholder="defaults to the site address" autocomplete="off">
+        </div>
+
+        <div class="field hidden" data-for="comps">
+          <label for="comp-address">Subject address</label>
+          <input type="text" id="comp-address" name="comp-address"
+                 placeholder="17719 Kinzie St, Northridge, CA 91325" autocomplete="off">
+          <p class="hint">Shortlists nearby rental comps, then opens an editable <strong>rent-comparability grid</strong> (CTCAC / HUD-92273 style). You confirm which comps to keep and set each one's characteristics; adjustment $ compute live from the SoLa ruleset (unit size, age, amenities), then export the formatted grid. Without a <code>RENTCAST_API_KEY</code> it runs on demo data.</p>
+          <label class="om-label">Bed types</label>
+          <div class="comp-beds">
+            <label><input type="checkbox" class="comp-bed" value="0" checked> Studio</label>
+            <label><input type="checkbox" class="comp-bed" value="1" checked> 1BR</label>
+            <label><input type="checkbox" class="comp-bed" value="2" checked> 2BR</label>
+            <label><input type="checkbox" class="comp-bed" value="3"> 3BR</label>
+          </div>
         </div>
 
         <button type="submit" id="run-btn" class="run-btn">Run feasibility</button>
@@ -119,6 +134,22 @@
           <aside id="review-preview" class="review-preview"></aside>
         </div>
         <p id="review-error" class="error-banner hidden"></p>
+      </section>
+
+      <section id="comp-panel" class="panel hidden">
+        <div class="review-head">
+          <div>
+            <h2 class="recent-head">Rent-comp grid — review &amp; edit</h2>
+            <p class="hint" id="comp-sub"></p>
+          </div>
+          <div class="status-actions">
+            <button id="comp-cancel" class="download-btn ghost" type="button">Cancel</button>
+            <button id="comp-go" class="download-btn" type="button">Export CTCAC grid</button>
+          </div>
+        </div>
+        <div id="comp-bedtabs" class="comp-bedtabs"></div>
+        <div id="comp-matrix" class="comp-matrix-wrap"></div>
+        <p id="comp-error" class="error-banner hidden"></p>
       </section>
 
       <section id="uw-panel" class="panel hidden">

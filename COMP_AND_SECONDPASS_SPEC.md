@@ -34,7 +34,15 @@ to `Pro_Forma`'s rent cells in pass 2.
 
 ## 1. The seven gaps (what "rounding out" means)
 
-### N1 — Comp adjustment engine (the grid's value-add)
+### N1 — Comp adjustment engine (the grid's value-add)  ✅ ENGINE + WRITER BUILT 2026-06-22
+`build/sources/comp_adjust.py` = the ruleset + math (size = subj $/SF × 0.10;
+age = $5/yr; per-line amenity/utility $), the single source of truth; verified to
+reproduce all three Kinzie 1-BR adjusted rents to the cent. `comps.py
+write_ctcac_grid()` (+ `--ctcac`) renders the formatted grid (subject + comps,
+Char/Adj pairs, Adjusted Rent / ratio / differential, 110% guardrail). Remaining:
+the web matrix editor (adapter 2) that seeds these defaults and lets the analyst
+edit live. Original scope below.
+
 Turn the Tier-A comp rows `comps.py` already produces into a **defensible
 Adjusted Rent**, mirroring the uploaded HUD-92273 / CTCAC grid (size $/SF, age,
 amenity/utility/parking line items → Adjusted Rent → differential vs. subject).

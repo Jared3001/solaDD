@@ -326,3 +326,27 @@ h1, .brand-mark, .tab, .run-btn, label, th, .phase, .kicker {
 .review-preview td { padding: 5px 0; font-size: 13px; border-bottom: 1px solid var(--line); }
 .review-preview td.col-answer { text-align: right; font-weight: 600; color: var(--navy); }
 .review-preview .hint { margin-top: 10px; }
+
+/* ---------- rent-comp matrix editor ---------- */
+.comp-beds { display: flex; gap: 16px; flex-wrap: wrap; }
+.comp-beds label { font-weight: 500; font-size: 14px; display: inline-flex; align-items: center; gap: 5px; }
+.comp-bedtabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.comp-bedtab {
+  padding: 6px 12px; border: 1px solid var(--line); background: #fff; border-radius: 6px;
+  font-size: 13px; font-weight: 600; color: var(--gray); cursor: pointer;
+}
+.comp-bedtab.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+.comp-matrix-wrap { overflow-x: auto; }
+.comp-matrix { border-collapse: collapse; font-size: 13px; min-width: 100%; }
+.comp-matrix th, .comp-matrix td { border: 1px solid var(--line); padding: 4px 8px; text-align: center; white-space: nowrap; }
+.comp-matrix thead th { background: var(--navy); color: #fff; position: sticky; top: 0; }
+.comp-matrix .cm-rowlab { text-align: left; font-weight: 600; color: var(--navy); position: sticky; left: 0; background: #fff; }
+.comp-matrix .cm-amen { font-weight: 400; color: var(--ink); }
+.comp-matrix .cm-subj { background: #DDEBF7; }
+.comp-matrix .cm-info td { color: var(--gray); }
+.comp-matrix .cm-sub td { background: #f3ede1; font-weight: 700; text-align: left; color: var(--navy); }
+.comp-matrix .cm-calc td { background: #FBF8F1; font-weight: 600; }
+.comp-matrix .cm-calc .cm-rowlab { background: #FBF8F1; }
+.comp-matrix .cm-over { background: #FCE4D6 !important; color: var(--flag); }
+.comp-matrix input[type=number] { width: 78px; padding: 3px 4px; border: 1px solid var(--line); border-radius: 4px; font-size: 13px; text-align: right; }
+.comp-matrix input:focus { outline: 0; border-color: var(--mid); }

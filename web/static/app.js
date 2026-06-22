@@ -24,7 +24,8 @@ document.querySelectorAll(".tab").forEach(tab => {
       document.querySelectorAll("[data-for]").forEach(f => {
         f.classList.toggle("hidden", f.dataset.for !== mode);
       });
-      $("#run-btn").textContent = mode === "underwrite" ? "Generate model" : "Run feasibility";
+      $("#run-btn").textContent = mode === "underwrite" ? "Generate model"
+        : mode === "comps" ? "Find rent comps" : "Run feasibility";
     }
   });
 });
@@ -43,6 +44,13 @@ $("#run-form").addEventListener("submit", async (e) => {
     fd.append("dd", ddFile);
     fd.append("name", $("#uw-name").value.trim());
     fetchOpts = { method: "POST", body: fd };
+  } else if (mode === "comps") {
+    const address = $("#comp-address").value.trim();
+    if (!address) { showError("Enter the subject address to find rent comps."); return; }
+    const beds = [...document.querySelectorAll(".comp-bed:checked")].map(c => Number(c.value));
+    if (!beds.length) { showError("Pick at least one bed type."); return; }
+    fetchOpts = { method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ mode: "comps", address, beds }) };
   } else {
     const omFile = mode === "single" ? ($("#om").files[0] || null) : null;
     const address = mode === "single" ? $("#address").value.trim() : "";
@@ -151,6 +159,157 @@ function deriveModelPreview(v) {
   ];
 }
 
+// ---------- rent-comp grid editor (matrix; reuses the edit→preview→auto-chain pattern) ----------
+async function openCompEditor(jobId) {
+  showError(null);
+  try {
+    const res = await fetch(`/api/comps/intake/${jobId}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not load comps.");
+    CompEditor.open(jobId, data);
+  } catch (err) { showError(err.message); }
+}
+
+const CompEditor = {
+  jobId: null, ruleset: null, beds: null, active: 0,
+  open(jobId, intake) {
+    this.jobId = jobId;
+    this.ruleset = intake.ruleset;
+    // seed editable state: subject (blank chars) + comps per bed
+    this.beds = {};
+    intake.beds.forEach(bt => {
+      this.beds[bt.bed] = {
+        subject: { sf: null, rent: null, year: null, baths: null, city: "",
+                   amenities: {}, utilities: {} },
+        comps: bt.comps.map(c => ({ ...c, include: true, amenities: {}, utilities: {} })),
+      };
+    });
+    this.active = intake.beds[0] ? intake.beds[0].bed : 0;
+    $("#comp-sub").textContent = `${intake.label} — confirm the comps, set each one's characteristics; adjustments compute live from the ruleset, then export.`;
+    this.renderTabs();
+    this.renderMatrix();
+    $("#comp-error").classList.add("hidden");
+    $("#comp-panel").classList.remove("hidden");
+    $("#comp-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+  },
+  close() { $("#comp-panel").classList.add("hidden"); },
+  BED_LABEL: { 0: "Studio", 1: "1BR", 2: "2BR", 3: "3BR", 4: "4BR" },
+  renderTabs() {
+    $("#comp-bedtabs").innerHTML = Object.keys(this.beds).map(b =>
+      `<button type="button" class="comp-bedtab${Number(b) === this.active ? " active" : ""}" data-bed="${b}">${this.BED_LABEL[b] || b + "BR"} (${this.beds[b].comps.length})</button>`).join("");
+    $("#comp-bedtabs").querySelectorAll(".comp-bedtab").forEach(t =>
+      t.addEventListener("click", () => { this.active = Number(t.dataset.bed); this.renderTabs(); this.renderMatrix(); }));
+  },
+  // JS mirror of comp_adjust (live preview only; Python writes the file)
+  adj(subj, comp) {
+    const rs = this.ruleset;
+    const size = (subj.sf && comp.sf && subj.rent) ? (subj.sf - comp.sf) * (subj.rent / subj.sf * rs.size_rate_fraction) : 0;
+    const age = (subj.year && comp.year) ? (subj.year - comp.year) * rs.age_per_year : 0;
+    const line = (sh, ch, v) => (ch && !sh) ? -v : (sh && !ch) ? v : 0;
+    let lines = 0;
+    rs.utility_labels.forEach(l => lines += line(subj.utilities[l], comp.utilities[l], rs.utility_values[l]));
+    rs.amenity_labels.forEach(l => lines += line(subj.amenities[l], comp.amenities[l], rs.amenity_values[l]));
+    const total = size + age + lines;
+    const adjRent = (comp.rent || 0) + total;
+    return { size, age, lines, total, adjRent, ratio: comp.rent ? adjRent / comp.rent : null };
+  },
+  renderMatrix() {
+    const bed = this.beds[this.active];
+    const subj = bed.subject;
+    const comps = bed.comps;
+    const colH = `<th class="cm-rowlab">Line</th><th class="cm-subj">Subject</th>` +
+      comps.map((c, i) => `<th>${esc(c.address || "Comp " + (i + 1))}</th>`).join("");
+    const numRow = (label, key) =>
+      `<tr><td class="cm-rowlab">${label}</td>` +
+      `<td><input type="number" data-who="subject" data-k="${key}" value="${subj[key] ?? ""}"></td>` +
+      comps.map((c, i) => `<td><input type="number" data-who="${i}" data-k="${key}" value="${c[key] ?? ""}"></td>`).join("") + `</tr>`;
+    const infoRow = (label, vals) =>
+      `<tr class="cm-info"><td class="cm-rowlab">${label}</td><td>—</td>` +
+      vals.map(v => `<td>${esc(v ?? "—")}</td>`).join("") + `</tr>`;
+    const chkRow = (label, group) =>
+      `<tr><td class="cm-rowlab cm-amen">${esc(label)}</td>` +
+      `<td><input type="checkbox" data-who="subject" data-g="${group}" data-l="${esc(label)}"${subj[group][label] ? " checked" : ""}></td>` +
+      comps.map((c, i) => `<td><input type="checkbox" data-who="${i}" data-g="${group}" data-l="${esc(label)}"${c[group][label] ? " checked" : ""}></td>`).join("") + `</tr>`;
+    const incRow = `<tr><td class="cm-rowlab">Include in grid</td><td>—</td>` +
+      comps.map((c, i) => `<td><input type="checkbox" data-who="${i}" data-inc="1"${c.include ? " checked" : ""}></td>`).join("") + `</tr>`;
+    const sub = (t) => `<tr class="cm-sub"><td colspan="${comps.length + 2}">${t}</td></tr>`;
+    const computed = `<tbody id="cm-computed">${this.computedRows()}</tbody>`;
+
+    $("#comp-matrix").innerHTML = `<table class="comp-matrix"><thead><tr>${colH}</tr></thead>
+      <tbody>
+        ${incRow}
+        ${infoRow("Distance (mi)", comps.map(c => c.distance_mi))}
+        ${numRow("Unit Size (SF)", "sf")}
+        ${numRow("Base Rent ($)", "rent")}
+        ${numRow("Year built/renov.", "year")}
+        ${numRow("# Bathrooms", "baths")}
+        ${sub("Utilities paid by tenant")}
+        ${this.ruleset.utility_labels.map(l => chkRow(l, "utilities")).join("")}
+        ${sub("Amenities (check what each HAS)")}
+        ${this.ruleset.amenity_labels.map(l => chkRow(l, "amenities")).join("")}
+      </tbody>
+      ${computed}
+    </table>`;
+    this.bind();
+  },
+  computedRows() {
+    const bed = this.beds[this.active], subj = bed.subject, comps = bed.comps;
+    const cell = (fn, cls = "") => `<td class="${cls}">—</td>` /*subject col*/;
+    const line = (label, pick, fmtFn, flag) =>
+      `<tr class="cm-calc"><td class="cm-rowlab">${label}</td><td>${label === "Adjusted Rent" && subj.rent ? "$" + fmt(subj.rent) : "—"}</td>` +
+      comps.map(c => {
+        const a = this.adj(subj, c);
+        const over = flag && c.rent && (a.adjRent / c.rent) > this.ruleset.guardrail;
+        return `<td class="${over ? "cm-over" : ""}">${fmtFn(a, c)}</td>`;
+      }).join("") + `</tr>`;
+    const money = v => v == null ? "—" : (v < 0 ? "-$" + fmt(-v) : "$" + fmt(v));
+    return (
+      line("Size adj", null, a => money(a.size)) +
+      line("Age adj", null, a => money(a.age)) +
+      line("Amenity/utility adj", null, a => money(a.lines)) +
+      line("Adjusted Rent", null, a => money(a.adjRent), false) +
+      line("Adj rent ÷ base", null, (a, c) => c.rent ? (a.adjRent / c.rent * 100).toFixed(1) + "%" : "—", true)
+    );
+  },
+  refreshComputed() { $("#cm-computed").innerHTML = this.computedRows(); },
+  bind() {
+    const bed = this.beds[this.active];
+    $("#comp-matrix").querySelectorAll("input").forEach(el => {
+      const ev = el.type === "checkbox" ? "change" : "input";
+      el.addEventListener(ev, () => {
+        const who = el.dataset.who;
+        const target = who === "subject" ? bed.subject : bed.comps[Number(who)];
+        if (el.dataset.inc) { target.include = el.checked; return; }
+        if (el.dataset.g) { target[el.dataset.g][el.dataset.l] = el.checked; }
+        else if (el.dataset.k) { target[el.dataset.k] = el.value === "" ? null : Number(el.value); }
+        this.refreshComputed();
+      });
+    });
+  },
+  collect() {
+    const grid = {};
+    for (const [b, bed] of Object.entries(this.beds)) {
+      const comps = bed.comps.filter(c => c.include);
+      if (!comps.length) continue;
+      grid[b] = {
+        subject: { ...bed.subject },
+        comps: comps.map(c => ({ address: c.address, city: c.city, distance_mi: c.distance_mi,
+                                 sf: c.sf, rent: c.rent, year: c.year, baths: c.baths,
+                                 amenities: c.amenities, utilities: c.utilities })),
+      };
+    }
+    return grid;
+  },
+};
+$("#comp-cancel").addEventListener("click", () => CompEditor.close());
+$("#comp-go").addEventListener("click", () => {
+  const grid = CompEditor.collect();
+  if (!Object.keys(grid).length) { const e = $("#comp-error"); e.textContent = "Include at least one comp."; e.classList.remove("hidden"); return; }
+  CompEditor.close();
+  launch({ method: "POST", headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ mode: "comps_grid", from_job: CompEditor.jobId, grid }) });
+});
+
 // ---------- reusable Review & Edit step ----------
 // schema = { subtitle, confirmLabel, previewNote, values:{}, fields:[{id,label,type,options,help}], derive:(values)->[{label,value}] }
 const ReviewEditor = {
@@ -222,6 +381,8 @@ function poll(jobId) {
       clearInterval(pollTimer);
       setRunning(false);
       if (job.status === "error") showError(job.error || "The run failed.");
+      // a finished comp shortlist auto-opens the editable grid (the in-between step)
+      if (job.status === "done" && job.kind === "comps") openCompEditor(job.id);
       loadStats();
       loadRecent();
     }
@@ -363,7 +524,8 @@ function badge(state) {
 function setRunning(on) {
   const btn = $("#run-btn");
   btn.disabled = on;
-  btn.textContent = on ? "Running…" : (mode === "underwrite" ? "Generate model" : "Run feasibility");
+  btn.textContent = on ? "Running…" : (mode === "underwrite" ? "Generate model"
+    : mode === "comps" ? "Find rent comps" : "Run feasibility");
 }
 function resetStatus() {
   $("#results").innerHTML = "";
@@ -374,6 +536,7 @@ function resetStatus() {
   $("#uw-panel").classList.add("hidden");
   $("#uw-body").innerHTML = "";
   $("#review-panel").classList.add("hidden");
+  $("#comp-panel").classList.add("hidden");
   $("#gen-model").classList.add("hidden");
   $("#download").classList.add("hidden");
   $("#matched").textContent = "";

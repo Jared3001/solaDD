@@ -161,6 +161,21 @@ def api_run():
             payload["overrides"] = ov
         jid = jobs.create_job("underwrite", payload)
         return jsonify({"job_id": jid})
+    if mode == "comps":
+        address = (data.get("address") or "").strip()
+        if not address:
+            return jsonify({"error": "Enter the subject address to find rent comps."}), 400
+        beds = data.get("beds") or [0, 1, 2]
+        if isinstance(beds, str):
+            beds = [int(x) for x in beds.replace(",", " ").split() if x.strip().isdigit()]
+        jid = jobs.create_job("comps", {"address": address, "beds": beds})
+        return jsonify({"job_id": jid})
+    if mode == "comps_grid":
+        if not data.get("grid"):
+            return jsonify({"error": "No grid data to write."}), 400
+        jid = jobs.create_job("comps_grid", {"from_job": data.get("from_job"),
+                                             "grid": data.get("grid")})
+        return jsonify({"job_id": jid})
     return jsonify({"error": "Unknown mode."}), 400
 
 
@@ -171,6 +186,16 @@ def api_underwrite_intake(jid):
     # review/edit step before generating the Stick + Modular models.
     try:
         return jsonify(jobs.underwrite_intake(jid))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 404
+
+
+@app.get("/api/comps/intake/<jid>")
+@login_required
+def api_comps_intake(jid):
+    # Subject + comp rows + adjustment ruleset for the comp review/edit matrix.
+    try:
+        return jsonify(jobs.comps_intake(jid))
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
 
