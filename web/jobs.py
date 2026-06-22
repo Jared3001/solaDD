@@ -58,6 +58,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 RUN_DIR = DATA_DIR
 COUNTER_FILE = DATA_DIR / "counter.json"
 INDEX_FILE = DATA_DIR / "jobs_index.json"   # compact recent-runs index — survives redeploys (files already persist in DATA_DIR)
+DEVICE_FILE = DATA_DIR / "devices.json"     # per-device usage tally (silent attribution) — survives redeploys
 
 # Time-saved metric. STARTING_CHECKLISTS = sites already automated before the
 # app started counting; each automated checklist saves MINUTES_PER_CHECKLIST.
@@ -65,6 +66,7 @@ STARTING_CHECKLISTS = int(os.environ.get("STARTING_CHECKLISTS", "9"))
 MINUTES_PER_CHECKLIST = int(os.environ.get("MINUTES_PER_CHECKLIST", "30"))
 _counter_lock = threading.Lock()
 _index_lock = threading.Lock()
+_device_lock = threading.Lock()
 
 # Schema metadata for labelling / grouping results in the UI.
 _schema = yaml.safe_load((ROOT / "canonical" / "schema.yaml").read_text())
@@ -678,6 +680,97 @@ def stats():
     }
 
 
+# --------------------------------------------------------------------------- #
+# per-device usage tally (silent attribution)
+#
+# Each browser/device is tagged with a stable anonymous id (a long-lived cookie
+# set by app.py); the connecting IP is recorded as a secondary hint. We keep a
+# per-device run count, persisted to the volume so it survives redeploys. This
+# is rough usage attribution, NOT identity: laptop+phone = two devices, an office
+# NAT collapses people to one IP (the cookie disambiguates), and clearing cookies
+# looks like a new device. An admin labels a device with a person's name.
+# --------------------------------------------------------------------------- #
+def _read_devices():
+    try:
+        return json.loads(DEVICE_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def _write_devices(d):
+    try:
+        DEVICE_FILE.write_text(json.dumps(d))
+    except Exception:
+        traceback.print_exc()
+
+
+def _touch_rec(d, did, ip, now):
+    """Upsert a device record's presence fields (first/last seen, IPs). Caller holds _device_lock."""
+    rec = d.get(did) or {"first_seen": now, "label": None, "ips": [], "counts": {}, "last_ip": ip}
+    rec["last_seen"] = now
+    if ip:
+        rec["last_ip"] = ip
+        if ip not in rec["ips"]:
+            rec["ips"] = (rec["ips"] + [ip])[-10:]   # keep the last 10 distinct IPs
+    d[did] = rec
+    return rec
+
+
+def touch_device(actor):
+    """Register a device's presence without counting a run — called on app load so
+    even people who only browse appear in the roster. Best-effort; never raises."""
+    if not actor or not actor.get("device"):
+        return
+    with _device_lock:
+        d = _read_devices()
+        _touch_rec(d, actor["device"], actor.get("ip") or "", _now())
+        _write_devices(d)
+
+
+def _bump_device(actor, kind):
+    """Increment a device's run count for one completed job. Best-effort; never raises."""
+    if not actor or not actor.get("device"):
+        return
+    with _device_lock:
+        d = _read_devices()
+        rec = _touch_rec(d, actor["device"], actor.get("ip") or "", _now())
+        rec["counts"][kind] = int(rec["counts"].get(kind, 0)) + 1
+        _write_devices(d)
+
+
+def device_totals():
+    """Per-device usage breakdown for the admin view, newest-active first.
+
+    'dd_runs' = single + assemblage (the runs that map to the time-saved metric);
+    'hours_saved' mirrors stats() so a person's number is comparable to the banner."""
+    d = _read_devices()
+    out = []
+    for did, rec in d.items():
+        counts = rec.get("counts", {}) or {}
+        dd = int(counts.get("single", 0)) + int(counts.get("assemblage", 0))
+        total = sum(int(v) for v in counts.values())
+        out.append({
+            "device": did, "short": did[:8], "label": rec.get("label"),
+            "last_ip": rec.get("last_ip"), "ips": rec.get("ips", []),
+            "first_seen": rec.get("first_seen"), "last_seen": rec.get("last_seen"),
+            "counts": counts, "total_runs": total, "dd_runs": dd,
+            "hours_saved": round(dd * MINUTES_PER_CHECKLIST / 60, 1),
+        })
+    out.sort(key=lambda r: r["last_seen"] or "", reverse=True)
+    return out
+
+
+def set_device_label(device_id, label):
+    """Name a device (admin only). Returns False if the device id is unknown."""
+    with _device_lock:
+        d = _read_devices()
+        if device_id not in d:
+            return False
+        d[device_id]["label"] = (label or "").strip() or None
+        _write_devices(d)
+        return True
+
+
 def _job_counts(j):
     """(field count, flag count) — from the live fields dict, else persisted stub counts."""
     with j["_lock"]:
@@ -768,7 +861,7 @@ def _prune():
                 pass
 
 
-def create_job(kind, payload):
+def create_job(kind, payload, actor=None):
     jid = uuid.uuid4().hex[:12]
     label = payload.get("address") or ", ".join(payload.get("apns", [])) or jid
     job = {
@@ -777,6 +870,7 @@ def create_job(kind, payload):
         "total": 0, "completed": 0, "fields": {},
         "parcels": None, "combined_sf": None, "om": None, "underwrite": None,
         "error": None, "file": None, "filename": None,
+        "actor": actor or {},          # {device, ip} — silent attribution, set by app.py from the request
         "started": _now(), "finished": None,
         "_lock": threading.Lock(),
     }
@@ -805,6 +899,7 @@ def _run(job):
     finally:
         job["finished"] = _now()
         if job["status"] == "done":
+            _bump_device(job.get("actor"), job["kind"])   # silent per-device attribution
             _persist_index()           # keep the volume index in sync with completed runs
 
 

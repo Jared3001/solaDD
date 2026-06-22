@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SoLa DD — Usage by device</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=Source+Serif+4:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .adm-wrap { max-width: 1040px; margin: 0 auto; padding: 28px 20px 64px; }
+    .adm-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .adm-head h1 { font-family: Archivo, sans-serif; color: var(--navy); margin: 0; font-size: 1.5rem; }
+    .adm-sub { color: var(--gray); font-size: .9rem; margin: 4px 0 0; }
+    .adm-note { background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--amber);
+                border-radius: 8px; padding: 12px 14px; margin: 18px 0 22px; color: var(--ink);
+                font-size: .86rem; line-height: 1.45; }
+    table.adm { width: 100%; border-collapse: collapse; background: #fff;
+                border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    table.adm th, table.adm td { padding: 10px 12px; text-align: left; font-size: .88rem;
+                border-bottom: 1px solid var(--line); vertical-align: middle; }
+    table.adm th { background: var(--navy); color: #fff; font-family: Archivo, sans-serif;
+                   font-weight: 600; font-size: .76rem; letter-spacing: .03em; text-transform: uppercase; }
+    table.adm tr:last-child td { border-bottom: none; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .muted { color: var(--gray); font-size: .8rem; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; color: var(--mid); }
+    .lbl-cell { display: flex; gap: 6px; align-items: center; }
+    .lbl-cell input { width: 140px; padding: 5px 8px; border: 1px solid var(--line);
+                      border-radius: 6px; font: inherit; font-size: .85rem; }
+    .lbl-cell button { padding: 5px 10px; border: none; border-radius: 6px; cursor: pointer;
+                       background: var(--mid); color: #fff; font-size: .8rem; }
+    .lbl-cell button:disabled { opacity: .45; cursor: default; }
+    .lbl-saved { color: var(--ok); font-size: .78rem; }
+    .empty { color: var(--gray); padding: 28px; text-align: center; }
+    .hint { color: var(--gray); font-size: .78rem; margin-top: 18px; }
+  </style>
+</head>
+<body style="background: var(--paper);">
+  <main class="adm-wrap">
+    <div class="adm-head">
+      <div>
+        <h1>Usage by device</h1>
+        <p class="adm-sub">Silent run attribution — no change to what team members see.</p>
+      </div>
+      <a href="{{ url_for('index') }}" class="muted">← Back to app</a>
+    </div>
+
+    <p class="adm-note">
+      Each row is one browser/device, identified by a long-lived anonymous cookie (the
+      connecting IP is a secondary hint). This is rough usage attribution, not identity:
+      one person on a laptop and phone shows as two devices, and clearing cookies starts a
+      new one. <strong>Name a device</strong> to map it to a person — give a laptop and phone
+      the same name to combine them. <em>Hours saved</em> counts DD checklists (single +
+      assemblage), matching the home-page banner.
+    </p>
+
+    <table class="adm">
+      <thead>
+        <tr>
+          <th>Person / device</th>
+          <th class="num">DD runs</th>
+          <th class="num">Hours saved</th>
+          <th class="num">Models</th>
+          <th class="num">Comps</th>
+          <th class="num">All runs</th>
+          <th>Last seen</th>
+          <th>Last IP</th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="8" class="empty">Loading…</td></tr>
+      </tbody>
+    </table>
+    <p class="hint">Totals persist across redeploys. Refresh to update.</p>
+  </main>
+
+  <script>
+    const $ = (s, el = document) => el.querySelector(s);
+    const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    function fmtWhen(iso) {
+      if (!iso) return "—";
+      const d = new Date(iso);
+      if (isNaN(d)) return iso;
+      return d.toLocaleString("en-US", {
+        timeZone: "America/Los_Angeles", month: "short", day: "numeric",
+        hour: "numeric", minute: "2-digit", hour12: true,
+      });
+    }
+
+    async function saveLabel(device, btn) {
+      const input = btn.parentElement.querySelector("input");
+      const note = btn.parentElement.querySelector(".lbl-saved");
+      btn.disabled = true;
+      try {
+        const r = await fetch("/api/admin/devices/label", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ device, label: input.value }),
+        });
+        const j = await r.json();
+        note.textContent = j.ok ? "saved" : "?";
+        setTimeout(() => (note.textContent = ""), 1500);
+      } catch (_) { note.textContent = "err"; }
+      btn.disabled = false;
+    }
+
+    async function load() {
+      const r = await fetch("/api/admin/devices");
+      if (!r.ok) { $("#rows").innerHTML = `<tr><td colspan="8" class="empty">Access denied.</td></tr>`; return; }
+      const { devices } = await r.json();
+      if (!devices.length) {
+        $("#rows").innerHTML = `<tr><td colspan="8" class="empty">No runs recorded yet.</td></tr>`;
+        return;
+      }
+      $("#rows").innerHTML = devices.map(d => {
+        const c = d.counts || {};
+        const models = c.underwrite || 0;
+        const comps = (c.comps || 0) + (c.comps_grid || 0);
+        return `
+        <tr>
+          <td>
+            <div class="lbl-cell">
+              <input type="text" value="${esc(d.label || "")}" placeholder="name…"
+                     data-device="${esc(d.device)}">
+              <button type="button" data-device="${esc(d.device)}">Save</button>
+              <span class="lbl-saved"></span>
+            </div>
+            <div class="mono">${esc(d.short)}</div>
+          </td>
+          <td class="num">${d.dd_runs}</td>
+          <td class="num">${d.hours_saved}</td>
+          <td class="num">${models}</td>
+          <td class="num">${comps}</td>
+          <td class="num">${d.total_runs}</td>
+          <td>${esc(fmtWhen(d.last_seen))}</td>
+          <td class="mono">${esc(d.last_ip || "—")}</td>
+        </tr>`;
+      }).join("");
+      $("#rows").querySelectorAll("button[data-device]").forEach(b =>
+        b.addEventListener("click", () => saveLabel(b.dataset.device, b)));
+    }
+    load();
+  </script>
+</body>
+</html>

@@ -11,11 +11,13 @@ in-memory job store is shared across requests:
 Local dev:  python -m web.app
 """
 import os
+import hmac
+import uuid
 import functools
 
 from flask import (
     Flask, request, session, redirect, url_for, render_template, jsonify,
-    send_file, abort,
+    send_file, abort, g,
 )
 
 from web import jobs
@@ -49,6 +51,62 @@ def too_large(_):
 # prototype shipped with. SECURITY: that fallback key is exposed in page source —
 # rotate it and set GEMINI_API_KEY in Railway, then drop the fallback.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+
+# Silent run attribution. Each browser/device gets a stable anonymous id stored in
+# a long-lived cookie (set transparently below — no UI, no behavior change); the
+# connecting IP is recorded as a secondary hint. Runs are stamped with both so the
+# admin view can tally usage per device. ADMIN_KEY gates that view; leave it unset
+# to disable the admin pages entirely.
+DEVICE_COOKIE = "sola_dev"
+DEVICE_COOKIE_MAXAGE = 60 * 60 * 24 * 365 * 2          # 2 years
+ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
+
+
+def _client_ip():
+    # Behind Railway's proxy the real client is the first hop in X-Forwarded-For;
+    # request.remote_addr would just be the proxy. Fall back to remote_addr locally.
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.remote_addr or ""
+
+
+@app.before_request
+def _identity():
+    # Resolve (or mint) this device's anonymous id for the duration of the request.
+    did = request.cookies.get(DEVICE_COOKIE)
+    g.new_device = not did
+    g.device_id = did or uuid.uuid4().hex
+    g.client_ip = _client_ip()
+
+
+@app.after_request
+def _set_device_cookie(resp):
+    # Persist a freshly minted id so the same browser is recognized next time.
+    # Skip health checks (uptime monitors) to keep the device roster clean.
+    if getattr(g, "new_device", False) and request.path != "/healthz":
+        secure = request.is_secure or request.headers.get("X-Forwarded-Proto") == "https"
+        resp.set_cookie(DEVICE_COOKIE, g.device_id, max_age=DEVICE_COOKIE_MAXAGE,
+                        httponly=True, samesite="Lax", secure=secure)
+    return resp
+
+
+def _actor():
+    return {"device": getattr(g, "device_id", ""), "ip": getattr(g, "client_ip", "")}
+
+
+def _admin_ok():
+    """True if the caller has unlocked the admin view. Requires ADMIN_KEY to be set;
+    the key is supplied once via /admin?key=… and then carried in the session."""
+    if not ADMIN_KEY:
+        return False
+    if session.get("admin"):
+        return True
+    key = request.args.get("key") or request.headers.get("X-Admin-Key", "")
+    if key and hmac.compare_digest(key, ADMIN_KEY):
+        session["admin"] = True
+        return True
+    return False
 
 
 def login_required(f):
@@ -88,6 +146,7 @@ def logout():
 @app.get("/")
 @login_required
 def index():
+    jobs.touch_device(_actor())     # register the device even if they only browse
     return render_template("index.html", sections=jobs.SECTIONS, sources=jobs.SOURCE_CATALOG)
 
 
@@ -123,7 +182,7 @@ def api_run():
             payload["om_name"] = om_file.filename
         elif not address:
             return jsonify({"error": "Enter an address or upload an OM."}), 400
-        jid = jobs.create_job("single", payload)
+        jid = jobs.create_job("single", payload, actor=_actor())
         return jsonify({"job_id": jid})
     if mode == "assemblage":
         raw = data.get("apns") or ""
@@ -132,7 +191,7 @@ def api_run():
             return jsonify({"error": "At least one APN is required."}), 400
         if len(apns) > MAX_APNS:
             return jsonify({"error": f"Too many APNs (max {MAX_APNS})."}), 400
-        jid = jobs.create_job("assemblage", {"apns": apns})
+        jid = jobs.create_job("assemblage", {"apns": apns}, actor=_actor())
         return jsonify({"job_id": jid})
     if mode == "underwrite":
         # Build the Stick + Modular pro-forma from a completed DD checklist —
@@ -159,7 +218,7 @@ def api_run():
                 ov = None
         if isinstance(ov, dict) and ov:
             payload["overrides"] = ov
-        jid = jobs.create_job("underwrite", payload)
+        jid = jobs.create_job("underwrite", payload, actor=_actor())
         return jsonify({"job_id": jid})
     if mode == "comps":
         address = (data.get("address") or "").strip()
@@ -168,13 +227,13 @@ def api_run():
         beds = data.get("beds") or [0, 1, 2]
         if isinstance(beds, str):
             beds = [int(x) for x in beds.replace(",", " ").split() if x.strip().isdigit()]
-        jid = jobs.create_job("comps", {"address": address, "beds": beds})
+        jid = jobs.create_job("comps", {"address": address, "beds": beds}, actor=_actor())
         return jsonify({"job_id": jid})
     if mode == "comps_grid":
         if not data.get("grid"):
             return jsonify({"error": "No grid data to write."}), 400
         jid = jobs.create_job("comps_grid", {"from_job": data.get("from_job"),
-                                             "grid": data.get("grid")})
+                                             "grid": data.get("grid")}, actor=_actor())
         return jsonify({"job_id": jid})
     return jsonify({"error": "Unknown mode."}), 400
 
@@ -229,6 +288,35 @@ def api_download(jid):
         abort(404)
     return send_file(job["file"], as_attachment=True,
                      download_name=job.get("filename") or "checklist.xlsx")
+
+
+@app.get("/admin")
+@login_required
+def admin():
+    # Per-device usage view. Hidden unless ADMIN_KEY is set and supplied once via
+    # /admin?key=… (then remembered in the session). Not linked from the app.
+    if not _admin_ok():
+        abort(404)
+    return render_template("admin.html")
+
+
+@app.get("/api/admin/devices")
+@login_required
+def api_admin_devices():
+    if not _admin_ok():
+        return jsonify({"error": "forbidden"}), 403
+    return jsonify({"devices": jobs.device_totals(),
+                    "minutes_per": jobs.MINUTES_PER_CHECKLIST})
+
+
+@app.post("/api/admin/devices/label")
+@login_required
+def api_admin_label():
+    if not _admin_ok():
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    ok = jobs.set_device_label((data.get("device") or "").strip(), data.get("label") or "")
+    return jsonify({"ok": ok})
 
 
 @app.get("/healthz")
