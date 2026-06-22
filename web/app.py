@@ -147,7 +147,10 @@ def logout():
 @login_required
 def index():
     jobs.touch_device(_actor())     # register the device even if they only browse
-    return render_template("index.html", sections=jobs.SECTIONS, sources=jobs.SOURCE_CATALOG)
+    # Admin-unlock can also be done from the home page via ?key=… (then remembered).
+    is_admin = _admin_ok()
+    return render_template("index.html", sections=jobs.SECTIONS, sources=jobs.SOURCE_CATALOG,
+                           is_admin=is_admin)
 
 
 @app.get("/modularz")

@@ -22,6 +22,7 @@
     </nav>
     <div class="topbar-right">
       <span id="health" class="health" title="Checking…"><span class="dot"></span><span class="health-label">…</span></span>
+      {% if is_admin %}<a class="logout" href="{{ url_for('admin') }}">Usage</a>{% endif %}
       <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
     </div>
   </header>
