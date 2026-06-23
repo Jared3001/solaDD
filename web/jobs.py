@@ -535,7 +535,7 @@ def run_underwrite(job):
             "residential_stories": _jsonable(dd.get("residential_stories")) or _uwl.DEFAULT_STORIES,
             "building_nrsf": _jsonable(dd.get("building_nrsf")) or _uwl.DEFAULT_NRSF,
         },
-        "hand_fields": ["Acquisition price", "BIPOC", "Prevailing wage"],
+        "hand_fields": ["BIPOC", "Prevailing wage"],
     }
     job["total"] = job["completed"] = 1
     job["file"] = str(zip_path)

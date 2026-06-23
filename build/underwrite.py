@@ -11,9 +11,11 @@ The exporter sets Auto (from DD) + Logic cells, and seeds first-pass placeholder
 defaults for the envelope the DD can't supply: residential stories (Pro_Forma!C15,
 default 3 — the C9 construction-type formula keys on it) and building NRSF
 (Pro_Forma!C17, default 20,000). With those blank the model collapses to zero, so
-they default unless the analyst overrides them. The remaining Hand fields are left
-untouched: acquisition price, BIPOC, prevailing wage. So the TEMPLATE should be a
-clean master pro-forma, not a filled deal — otherwise those hand fields carry over.
+they default unless the analyst overrides them. The land/acquisition price
+(Pro_Forma!S16) is written when supplied (a required input on the web review step;
+blank on the CLI/DD path). The remaining Hand fields are left untouched: BIPOC,
+prevailing wage. So the TEMPLATE should be a clean master pro-forma, not a filled
+deal — otherwise those hand fields carry over.
 --template defaults to $SOLA_UW_TEMPLATE.
 
 Usage:

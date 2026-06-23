@@ -120,7 +120,7 @@ function openModelReview(jobId, intake) {
   ReviewEditor.open({
     subtitle: `${intake.label} — adjust the automated inputs, preview, then generate. Defaults are the DD answers.`,
     confirmLabel: "Generate Stick + Modular models",
-    previewNote: "Derived live from the inputs (same rules the exporter uses). Residential stories & building NRSF default to the placeholders below in the absence of real numbers; acquisition price, BIPOC & prevailing wage stay analyst-entered in Excel.",
+    previewNote: "Derived live from the inputs (same rules the exporter uses). Land purchase price is required. Residential stories & building NRSF default to the placeholders below in the absence of real numbers; BIPOC & prevailing wage stay analyst-entered in Excel.",
     values: intake.values,
     fields: [
       { id: "deal_name", label: "Deal name", type: "text" },
@@ -130,6 +130,8 @@ function openModelReview(jobId, intake) {
       { id: "resource", label: "Resource area", type: "select", options: o.resource, help: "drives product type & bedroom mix" },
       { id: "neighborhood_change", label: "Neighborhood change area", type: "select", options: o.neighborhood_change, help: "drives CRA eligibility" },
       { id: "land_sf", label: "Land area (SF)", type: "number" },
+      { id: "acquisition_price", label: "Land purchase price ($)", type: "number", required: true,
+        placeholder: "e.g. 10000000", help: "required — written to the model (S16)" },
       { id: "residential_stories", label: "Residential stories", type: "number",
         placeholder: String((intake.placeholders && intake.placeholders.residential_stories) ?? 3),
         help: "drives FAR, construction type & cost; defaults to 3 if blank" },
@@ -162,6 +164,7 @@ function deriveModelPreview(v) {
     { label: "Resource (C6)", value: v.resource || "—" },
     { label: "Neighborhood change (C7)", value: v.neighborhood_change || "—" },
     { label: "Land SF (C12)", value: sf },
+    { label: "Land purchase price (S16)", value: pos(v.acquisition_price) ? "$" + fmt(v.acquisition_price) : "— required" },
     { label: "Residential stories (C15)", value: stories + dflt(pos(v.residential_stories)) },
     { label: "Building NRSF (C17)", value: fmt(nrsf) + dflt(pos(v.building_nrsf)) },
     { label: "→ Product", value: lf ? "Large Family" : "Standard (1B)" },
@@ -350,7 +353,8 @@ const ReviewEditor = {
         const ph = f.placeholder != null ? ` placeholder="${esc(f.placeholder)}"` : "";
         ctrl = `<input type="${f.type === "number" ? "number" : "text"}" data-fid="${esc(f.id)}" value="${esc(v)}"${ph}>`;
       }
-      return `<div class="rv-field"><label>${esc(f.label)}</label>${ctrl}${f.help ? `<span class="rv-help">${esc(f.help)}</span>` : ""}</div>`;
+      const lbl = esc(f.label) + (f.required ? ` <span class="rv-req">*</span>` : "");
+      return `<div class="rv-field"><label>${lbl}</label>${ctrl}${f.help ? `<span class="rv-help">${esc(f.help)}</span>` : ""}</div>`;
     }).join("");
     $("#review-inputs").querySelectorAll("[data-fid]").forEach(el => {
       el.addEventListener("input", () => {
@@ -361,6 +365,12 @@ const ReviewEditor = {
       });
     });
   },
+  missingRequired() {
+    return (this.schema.fields || [])
+      .filter(f => f.required)
+      .filter(f => { const v = this.values[f.id]; return v === null || v === undefined || v === ""; })
+      .map(f => f.label);
+  },
   renderPreview() {
     const rows = this.schema.derive(this.values);
     $("#review-preview").innerHTML = `<h3 class="section-head">Model will use</h3>`
@@ -370,6 +380,14 @@ const ReviewEditor = {
 };
 $("#review-cancel").addEventListener("click", () => ReviewEditor.close());
 $("#review-go").addEventListener("click", () => {
+  const missing = ReviewEditor.missingRequired();
+  const err = $("#review-error");
+  if (missing.length) {
+    err.textContent = `Please fill required field${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}.`;
+    err.classList.remove("hidden");
+    return;
+  }
+  err.classList.add("hidden");
   ReviewEditor.close();
   if (ReviewEditor.onConfirm) ReviewEditor.onConfirm(ReviewEditor.values);
 });

@@ -183,6 +183,12 @@ def base_cells(dd: dict):
     # (see DEFAULT_STORIES / DEFAULT_NRSF). Without these the model is broken.
     put("C15", _int_or(dd.get("residential_stories"), DEFAULT_STORIES))
     put("C17", _int_or(dd.get("building_nrsf"), DEFAULT_NRSF))
+    # Land / acquisition purchase price (Pro_Forma!S16). Collected as a REQUIRED
+    # input on the web review step; only written when supplied so the CLI/DD path
+    # (which can't know the price) leaves it blank for the analyst to fill.
+    acq = _num(dd.get("acquisition_price"))
+    if acq is not None:
+        put("S16", acq)
 
     meta = {
         "product": "Large Family" if lf else "Standard (1B)",
@@ -250,6 +256,7 @@ def derived_preview(values: dict) -> dict:
     mix = bedroom_mix(lf)
     stories = _int_or(values.get("residential_stories"), DEFAULT_STORIES)
     nrsf = _int_or(values.get("building_nrsf"), DEFAULT_NRSF)
+    acq = _num(values.get("acquisition_price"))
     return {
         "product": "Large Family" if lf else "Standard (1B)",
         "cra": cra(values.get("neighborhood_change"), lf),
@@ -259,6 +266,7 @@ def derived_preview(values: dict) -> dict:
         "ami_mix": "10% @30% · 10% @50% · 80% @60%",
         "residential_stories": stories,
         "building_nrsf": nrsf,
+        "acquisition_price": acq,
         "_mix_cells": mix,
     }
 
@@ -278,6 +286,8 @@ def intake(dd: dict) -> dict:
         # exporter fills DEFAULT_STORIES / DEFAULT_NRSF when the analyst doesn't.
         "residential_stories": _num(dd.get("residential_stories")),
         "building_nrsf": _num(dd.get("building_nrsf")),
+        # required on the review step (no DD source) — analyst must enter it.
+        "acquisition_price": _num(dd.get("acquisition_price")),
     }
     return {"values": values, "options": INTAKE_OPTIONS,
             "placeholders": {"residential_stories": DEFAULT_STORIES, "building_nrsf": DEFAULT_NRSF},
@@ -302,6 +312,8 @@ def apply_overrides(dd: dict, ov: dict) -> tuple:
         dd["residential_stories"] = ov["residential_stories"]
     if ov.get("building_nrsf") not in (None, ""):
         dd["building_nrsf"] = ov["building_nrsf"]
+    if ov.get("acquisition_price") not in (None, ""):
+        dd["acquisition_price"] = ov["acquisition_price"]
     if ov.get("qct_dda") is not None:
         v = ov["qct_dda"]
         dd["qct"] = "Yes" if v == "QCT" else "No"
