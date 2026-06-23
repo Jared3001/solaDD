@@ -531,8 +531,11 @@ def run_underwrite(job):
         "flags": meta.get("flags", []),
         "models": [p.name for p in paths],
         "inputs": {k: _jsonable(v) for k, v in dd.items()},
-        "hand_fields": ["Residential stories (C15)", "Acquisition price",
-                        "BIPOC", "Prevailing wage"],
+        "envelope_defaults": {
+            "residential_stories": _jsonable(dd.get("residential_stories")) or _uwl.DEFAULT_STORIES,
+            "building_nrsf": _jsonable(dd.get("building_nrsf")) or _uwl.DEFAULT_NRSF,
+        },
+        "hand_fields": ["Acquisition price", "BIPOC", "Prevailing wage"],
     }
     job["total"] = job["completed"] = 1
     job["file"] = str(zip_path)

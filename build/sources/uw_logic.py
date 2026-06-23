@@ -39,6 +39,15 @@ AMI_SHARES = {"R35": 0.10, "R36": 0.10, "R38": 0}
 CONSTRUCTION_TIME = {"Stick": 24, "Modular": 18}      # Draws_Module!B5, months
 MODULAR_SIZES = {"L5": 804, "L6": 994}                # 2B / 3B avg NRSF; Stick keeps 700/900
 
+# First-pass envelope placeholders (Pro_Forma C15 / C17). The DD can't supply
+# these, and with them blank the whole stories -> FAR (C16) -> NRSF (C17) ->
+# Units (C14) -> cost (D36) cascade collapses to zero, which silently breaks the
+# model. So the exporter seeds a generic building the analyst overrides with the
+# real envelope. Writing C17 as a literal intentionally replaces the template's
+# lot x FAR formula (=D12*43560*C16*0.8) — NRSF becomes a hand input, not derived.
+DEFAULT_STORIES = 3        # Pro_Forma!C15 (residential stories) — drives the C9 type formula
+DEFAULT_NRSF    = 20000    # Pro_Forma!C17 (building NRSF)
+
 
 # ---------- field transforms ----------
 def project_name(address: str) -> str:
@@ -170,6 +179,10 @@ def base_cells(dd: dict):
         put(c, v)
     for c, v in AMI_SHARES.items():
         put(c, v)
+    # Envelope placeholders — use the analyst override when supplied, else default
+    # (see DEFAULT_STORIES / DEFAULT_NRSF). Without these the model is broken.
+    put("C15", _int_or(dd.get("residential_stories"), DEFAULT_STORIES))
+    put("C17", _int_or(dd.get("building_nrsf"), DEFAULT_NRSF))
 
     meta = {
         "product": "Large Family" if lf else "Standard (1B)",
@@ -207,6 +220,14 @@ def _num(v):
     return float(s) if s else None
 
 
+def _int_or(v, default):
+    """A positive number from v (whole numbers stay int), else the placeholder default."""
+    n = _num(v)
+    if not n or n <= 0:
+        return default
+    return int(n) if float(n).is_integer() else n
+
+
 # --------------------------------------------------------------------------- #
 # Review & edit step — the editable intake the web front end shows BEFORE export.
 # `intake(dd)` returns the editable defaults + the select vocabularies + a
@@ -227,6 +248,8 @@ def derived_preview(values: dict) -> dict:
     res = resource(values.get("resource", ""))
     lf = is_large_family(res)
     mix = bedroom_mix(lf)
+    stories = _int_or(values.get("residential_stories"), DEFAULT_STORIES)
+    nrsf = _int_or(values.get("building_nrsf"), DEFAULT_NRSF)
     return {
         "product": "Large Family" if lf else "Standard (1B)",
         "cra": cra(values.get("neighborhood_change"), lf),
@@ -234,6 +257,8 @@ def derived_preview(values: dict) -> dict:
         "bedroom_mix": ("0% Studio · 50% 1B · 25% 2B · 25% 3B" if lf
                         else "100% 1B"),
         "ami_mix": "10% @30% · 10% @50% · 80% @60%",
+        "residential_stories": stories,
+        "building_nrsf": nrsf,
         "_mix_cells": mix,
     }
 
@@ -249,8 +274,14 @@ def intake(dd: dict) -> dict:
         "resource": resource(dd.get("resource_area", "")),
         "neighborhood_change": "Yes" if _yes(dd.get("neighborhood_change_area")) else "No",
         "land_sf": _num(dd.get("land_sf")),
+        # left blank so the form shows the placeholder default (3 / 20,000); the
+        # exporter fills DEFAULT_STORIES / DEFAULT_NRSF when the analyst doesn't.
+        "residential_stories": _num(dd.get("residential_stories")),
+        "building_nrsf": _num(dd.get("building_nrsf")),
     }
-    return {"values": values, "options": INTAKE_OPTIONS, "derived": derived_preview(values)}
+    return {"values": values, "options": INTAKE_OPTIONS,
+            "placeholders": {"residential_stories": DEFAULT_STORIES, "building_nrsf": DEFAULT_NRSF},
+            "derived": derived_preview(values)}
 
 
 def apply_overrides(dd: dict, ov: dict) -> tuple:
@@ -267,6 +298,10 @@ def apply_overrides(dd: dict, ov: dict) -> tuple:
         dd["neighborhood_change_area"] = ov["neighborhood_change"]
     if ov.get("land_sf") not in (None, ""):
         dd["land_sf"] = ov["land_sf"]
+    if ov.get("residential_stories") not in (None, ""):
+        dd["residential_stories"] = ov["residential_stories"]
+    if ov.get("building_nrsf") not in (None, ""):
+        dd["building_nrsf"] = ov["building_nrsf"]
     if ov.get("qct_dda") is not None:
         v = ov["qct_dda"]
         dd["qct"] = "Yes" if v == "QCT" else "No"

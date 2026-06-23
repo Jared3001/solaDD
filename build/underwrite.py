@@ -7,11 +7,14 @@ Turns a completed DD checklist into TWO ready-to-recalc pro-forma models
 projection-logic assumptions (UNDERWRITING_INTAKE.md Part B) into SoLa's
 pro-forma template, preserving its macros / LAMBDA names / formulas.
 
-The exporter only sets Auto (from DD) + Logic cells. It deliberately leaves the
-analyst's Hand fields untouched: residential stories (Pro_Forma!C15, which the
-C9 construction-type formula keys on), acquisition price, BIPOC, prevailing
-wage. So the TEMPLATE should be a clean master pro-forma, not a filled deal —
-otherwise those hand fields carry over.  --template defaults to $SOLA_UW_TEMPLATE.
+The exporter sets Auto (from DD) + Logic cells, and seeds first-pass placeholder
+defaults for the envelope the DD can't supply: residential stories (Pro_Forma!C15,
+default 3 — the C9 construction-type formula keys on it) and building NRSF
+(Pro_Forma!C17, default 20,000). With those blank the model collapses to zero, so
+they default unless the analyst overrides them. The remaining Hand fields are left
+untouched: acquisition price, BIPOC, prevailing wage. So the TEMPLATE should be a
+clean master pro-forma, not a filled deal — otherwise those hand fields carry over.
+--template defaults to $SOLA_UW_TEMPLATE.
 
 Usage:
   python build/underwrite.py path/to/DD_checklist.xlsx \

@@ -120,7 +120,7 @@ function openModelReview(jobId, intake) {
   ReviewEditor.open({
     subtitle: `${intake.label} — adjust the automated inputs, preview, then generate. Defaults are the DD answers.`,
     confirmLabel: "Generate Stick + Modular models",
-    previewNote: "Derived live from the inputs (same rules the exporter uses). Acquisition price, residential stories, BIPOC & prevailing wage stay analyst-entered in Excel.",
+    previewNote: "Derived live from the inputs (same rules the exporter uses). Residential stories & building NRSF default to the placeholders below in the absence of real numbers; acquisition price, BIPOC & prevailing wage stay analyst-entered in Excel.",
     values: intake.values,
     fields: [
       { id: "deal_name", label: "Deal name", type: "text" },
@@ -130,6 +130,12 @@ function openModelReview(jobId, intake) {
       { id: "resource", label: "Resource area", type: "select", options: o.resource, help: "drives product type & bedroom mix" },
       { id: "neighborhood_change", label: "Neighborhood change area", type: "select", options: o.neighborhood_change, help: "drives CRA eligibility" },
       { id: "land_sf", label: "Land area (SF)", type: "number" },
+      { id: "residential_stories", label: "Residential stories", type: "number",
+        placeholder: String((intake.placeholders && intake.placeholders.residential_stories) ?? 3),
+        help: "drives FAR, construction type & cost; defaults to 3 if blank" },
+      { id: "building_nrsf", label: "Building NRSF", type: "number",
+        placeholder: String((intake.placeholders && intake.placeholders.building_nrsf) ?? 20000),
+        help: "drives unit count & cost; defaults to 20,000 if blank" },
     ],
     derive: deriveModelPreview,
   }, (values) => {
@@ -144,6 +150,10 @@ function deriveModelPreview(v) {
   const cra = (String(v.neighborhood_change).toLowerCase() !== "yes" && !lf) ? "Yes" : "No";
   const mix = lf ? "0% Studio · 50% 1B · 25% 2B · 25% 3B" : "100% 1B";
   const sf = (v.land_sf != null && v.land_sf !== "") ? fmt(v.land_sf) : "—";
+  const pos = (x) => (x != null && x !== "" && Number(x) > 0);
+  const stories = pos(v.residential_stories) ? Number(v.residential_stories) : 3;
+  const nrsf = pos(v.building_nrsf) ? Number(v.building_nrsf) : 20000;
+  const dflt = (real) => (real ? "" : " (default)");
   return [
     { label: "Project (B2)", value: v.deal_name || "—" },
     { label: "County (C3)", value: v.county || "—" },
@@ -152,6 +162,8 @@ function deriveModelPreview(v) {
     { label: "Resource (C6)", value: v.resource || "—" },
     { label: "Neighborhood change (C7)", value: v.neighborhood_change || "—" },
     { label: "Land SF (C12)", value: sf },
+    { label: "Residential stories (C15)", value: stories + dflt(pos(v.residential_stories)) },
+    { label: "Building NRSF (C17)", value: fmt(nrsf) + dflt(pos(v.building_nrsf)) },
     { label: "→ Product", value: lf ? "Large Family" : "Standard (1B)" },
     { label: "→ CRA (C8)", value: cra },
     { label: "→ Bedroom mix", value: mix },
@@ -335,7 +347,8 @@ const ReviewEditor = {
         ctrl = `<select data-fid="${esc(f.id)}">${f.options.map(opt =>
           `<option value="${esc(opt)}"${String(opt) === String(v) ? " selected" : ""}>${esc(opt)}</option>`).join("")}</select>`;
       } else {
-        ctrl = `<input type="${f.type === "number" ? "number" : "text"}" data-fid="${esc(f.id)}" value="${esc(v)}">`;
+        const ph = f.placeholder != null ? ` placeholder="${esc(f.placeholder)}"` : "";
+        ctrl = `<input type="${f.type === "number" ? "number" : "text"}" data-fid="${esc(f.id)}" value="${esc(v)}"${ph}>`;
       }
       return `<div class="rv-field"><label>${esc(f.label)}</label>${ctrl}${f.help ? `<span class="rv-help">${esc(f.help)}</span>` : ""}</div>`;
     }).join("");
