@@ -77,10 +77,36 @@ def export(dd, template_path, out_dir, deal_name=None):
         cells[("Pro_Forma", "B2")] = deal                  # keep B2 == filename/deal name (honors a review-step edit)
         for (sheet, ref), val in cells.items():
             wb[sheet][ref] = val
+        _force_iterative_calc(wb)                          # bond sizing is circular — see below
         out = out_dir / f"{deal} — {method}.xlsm"        # em dash per Part C spec
         wb.save(out)
         written.append(out)
     return written, meta
+
+
+def _force_iterative_calc(wb):
+    """Ship a COMPLETE iterative-calculation spec so Excel resolves the model.
+
+    The pro-forma's bond/loan sizing is intentionally circular: the bond and
+    permanent-loan amounts (Pro_Forma W21/W24/W25) depend on total project cost
+    (C55), which includes loan costs (C51) and construction interest (C52/C53),
+    which depend back on the loan amounts. Excel can only resolve that loop with
+    iterative calculation ON; with it off the circular cells route through the
+    PV/PMT/RATE functions and collapse to #VALUE!, cascading through the whole
+    bond + returns section.
+
+    The template already carries iterate="1", but omits iterateCount — and
+    Excel's iterative toggle is application-level, so some sessions (notably
+    Excel for Mac, or when another workbook is already open) don't adopt the
+    file's request. Writing the full standard spec (count 100, delta 0.001)
+    maximizes the chance Excel honors it on open. Users on a session that still
+    won't enable it must turn on iterative calculation in Excel options.
+    """
+    calc = wb.calculation
+    calc.iterate = True
+    calc.iterateCount = 100
+    calc.iterateDelta = 0.001
+    calc.fullCalcOnLoad = True
 
 
 # ---------------- self-test: round-trip the analyzed Kinzie example ----------------
