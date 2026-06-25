@@ -352,7 +352,15 @@ h1, .brand-mark, .tab, .run-btn, label, th, .phase, .kicker {
 }
 .scn-tag-modular { background: #e8f0fb; color: var(--mid); }
 .scn-tag-stick    { background: #fdf3e3; color: #8a5a00; }
-.scn-meta { font-size: 12px; color: var(--gray); grid-column: 2 / -1; margin-top: -4px; }
+.scn-meta { font-size: 12px; color: var(--gray); grid-column: 2 / -1; }
+.scn-mix { display: flex; align-items: center; gap: 6px; grid-column: 2 / -1; flex-wrap: wrap; }
+.scn-mix-locked { font-size: 11px; color: var(--gray); padding: 3px 9px; background: #f3f4f6; border-radius: 5px; }
+.scn-mix-field { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
+.scn-mix-bed { font-size: 10px; color: var(--gray); }
+.scn-mix-1b { font-size: 13px; font-weight: 600; min-width: 38px; text-align: center; color: var(--navy); padding: 3px 4px; background: #eef2f8; border-radius: 5px; }
+.scn-mix-inp { width: 46px; padding: 3px 4px; font-size: 13px; border: 1px solid var(--line); border-radius: 5px; text-align: center; color: var(--navy); font-weight: 500; cursor: text; }
+.scn-mix-inp:focus { outline: none; border-color: var(--mid); }
+.scn-mix-sep { color: var(--gray); font-size: 11px; }
 @media (max-width: 600px) {
   .scn-row { grid-template-columns: 20px 1fr; }
   .scn-tag { display: none; }

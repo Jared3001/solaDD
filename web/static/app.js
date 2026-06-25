@@ -194,14 +194,21 @@ const ScenarioPicker = {
         const sfNote = s.constr === "Modular"
           ? "1B 497 · 2B 804 · 3B 994 SF"
           : (s.lf === "Yes" ? "1B 475 · 2B 735 · 3B 945 SF" : "1B 450 · 2B 700 · 3B 900 SF");
-        const mixNote = s.lf === "Yes"
-          ? "50% 1B · 25% 2B · 25% 3B"
-          : (s.sh2B > 0 ? `${Math.round((1-s.sh2B-s.sh3B)*100)}% 1B · ${Math.round(s.sh2B*100)}% 2B` : "100% 1B");
+        const mixHtml = s.lf === "Yes"
+          ? `<span class="scn-mix"><span class="scn-mix-locked">50% 1B · 25% 2B · 25% 3B (locked — Large Family)</span></span>`
+          : `<span class="scn-mix">
+              <span class="scn-mix-field"><span class="scn-mix-1b" id="scn-1b-${i}">${Math.round((1-s.sh2B-s.sh3B)*100)}%</span><span class="scn-mix-bed">1B</span></span>
+              <span class="scn-mix-sep">·</span>
+              <span class="scn-mix-field"><input type="number" class="scn-mix-inp" data-idx="${i}" data-bed="2" min="0" max="100" step="5" value="${Math.round(s.sh2B*100)}"><span class="scn-mix-bed">2B %</span></span>
+              <span class="scn-mix-sep">·</span>
+              <span class="scn-mix-field"><input type="number" class="scn-mix-inp" data-idx="${i}" data-bed="3" min="0" max="100" step="5" value="${Math.round(s.sh3B*100)}"><span class="scn-mix-bed">3B %</span></span>
+             </span>`;
         return `<label class="scn-row">
           <input type="checkbox" class="scn-chk" data-idx="${i}" checked>
           <span class="scn-name">${esc(s.name)}</span>
           <span class="scn-tag scn-tag-${s.constr.toLowerCase()}">${esc(s.constr)}</span>
-          <span class="scn-meta">${esc(s.stories)} stories · podium ${s.podium} · ${esc(mixNote)} · ${esc(sfNote)}</span>
+          <span class="scn-meta">${esc(s.stories)} stories · podium ${s.podium} · ${esc(sfNote)}</span>
+          ${mixHtml}
         </label>`;
       }),
     ].join("");
@@ -209,13 +216,34 @@ const ScenarioPicker = {
     document.getElementById("scn-all").addEventListener("change", (e) => {
       $("#scn-list").querySelectorAll(".scn-chk").forEach(cb => { cb.checked = e.target.checked; });
     });
+    $("#scn-list").querySelectorAll(".scn-mix-inp").forEach(inp => {
+      inp.addEventListener("input", () => {
+        const idx = inp.dataset.idx;
+        const i2 = $("#scn-list").querySelector(`.scn-mix-inp[data-idx="${idx}"][data-bed="2"]`);
+        const i3 = $("#scn-list").querySelector(`.scn-mix-inp[data-idx="${idx}"][data-bed="3"]`);
+        const v2 = Math.min(100, Math.max(0, Number(i2.value) || 0));
+        const v3 = Math.min(100, Math.max(0, Number(i3.value) || 0));
+        const el1 = document.getElementById(`scn-1b-${idx}`);
+        if (el1) el1.textContent = Math.max(0, 100 - v2 - v3) + "%";
+      });
+    });
   },
 
   selected() {
     const checks = [...($("#scn-list").querySelectorAll(".scn-chk"))];
     return checks
       .filter(cb => cb.checked)
-      .map(cb => this.scenarios[Number(cb.dataset.idx)]);
+      .map(cb => {
+        const i = Number(cb.dataset.idx);
+        const s = { ...this.scenarios[i] };
+        if (s.lf !== "Yes") {
+          const i2 = $("#scn-list").querySelector(`.scn-mix-inp[data-idx="${i}"][data-bed="2"]`);
+          const i3 = $("#scn-list").querySelector(`.scn-mix-inp[data-idx="${i}"][data-bed="3"]`);
+          if (i2) s.sh2B = Math.min(1, Math.max(0, Number(i2.value) / 100));
+          if (i3) s.sh3B = Math.min(1, Math.max(0, Number(i3.value) / 100));
+        }
+        return s;
+      });
   },
 };
 
