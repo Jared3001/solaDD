@@ -42,7 +42,7 @@ import zipfile
 import openpyxl
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(HERE, "models", "LIHTC_Model_v28.xlsm")
+MODEL_PATH = os.path.join(HERE, "models", "LIHTC_Model_v30.xlsm")
 
 # Pro_Forma is the main sheet; in v28 it is stored as sheet3.xml. Resolved
 # dynamically (below) so a re-ordered workbook still works.
@@ -437,11 +437,12 @@ def build_download(inputs_num=None, inputs_txt=None, tolerant=False):
     return buf.getvalue()
 
 
-# Per-unit SF overrides for scenario generation (v28 model has hardcoded SF;
-# Stick sizes differ from the Modular defaults already in MODULAR_SIZES).
+# Per-unit SF overrides for scenario generation.
+# Stick SF splits by Large Family: LF uses 475/735/945, non-LF uses 450/700/900.
 SCENARIO_SF = {
-    "Modular": {"L4": 497, "L5": 804, "L6": 994},
-    "Stick":   {"L4": 475, "L5": 735, "L6": 945},
+    "Modular":   {"L4": 497, "L5": 804, "L6": 994},
+    "Stick":     {"L4": 450, "L5": 700, "L6": 900},
+    "Stick_LF":  {"L4": 475, "L5": 735, "L6": 945},
 }
 
 _V28_FORMULA_CELLS = None
@@ -539,7 +540,10 @@ def build_for_scenario(dd, scenario, deal_name=None):
         "I5":  float(scenario["sh2B"]),
         "I6":  float(scenario["sh3B"]),
     })
-    num.update(SCENARIO_SF.get(scenario["constr"], {}))
+    sf_key = scenario["constr"]
+    if sf_key == "Stick" and scenario.get("lf") == "Yes":
+        sf_key = "Stick_LF"
+    num.update(SCENARIO_SF.get(sf_key, {}))
     txt.update({"C11": scenario["lf"]})
 
     if deal_name:

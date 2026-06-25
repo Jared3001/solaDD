@@ -193,7 +193,7 @@ const ScenarioPicker = {
       ...this.scenarios.map((s, i) => {
         const sfNote = s.constr === "Modular"
           ? "1B 497 · 2B 804 · 3B 994 SF"
-          : "1B 475 · 2B 735 · 3B 945 SF";
+          : (s.lf === "Yes" ? "1B 475 · 2B 735 · 3B 945 SF" : "1B 450 · 2B 700 · 3B 900 SF");
         const mixNote = s.lf === "Yes"
           ? "50% 1B · 25% 2B · 25% 3B"
           : (s.sh2B > 0 ? `${Math.round((1-s.sh2B-s.sh3B)*100)}% 1B · ${Math.round(s.sh2B*100)}% 2B` : "100% 1B");
