@@ -120,7 +120,7 @@ function openModelReview(jobId, intake) {
   ReviewEditor.open({
     subtitle: `${intake.label} — adjust the automated inputs, preview, then select scenarios. Defaults are the DD answers.`,
     confirmLabel: "Choose scenarios →",
-    previewNote: "Derived live from the inputs (same rules the exporter uses). Residential stories, NRSF, and land price all have sensible defaults when blank; BIPOC & prevailing wage stay analyst-entered in Excel.",
+    previewNote: "Derived live from the inputs (same rules the exporter uses). Residential stories and land price have sensible defaults when blank; NRSF is a formula in the model. BIPOC & prevailing wage stay analyst-entered in Excel.",
     values: intake.values,
     fields: [
       { id: "deal_name", label: "Deal name", type: "text" },
@@ -135,9 +135,6 @@ function openModelReview(jobId, intake) {
       { id: "residential_stories", label: "Residential stories", type: "number",
         placeholder: String((intake.placeholders && intake.placeholders.residential_stories) ?? 5),
         help: "drives FAR, construction type & cost; defaults to 5 if blank" },
-      { id: "building_nrsf", label: "Building NRSF", type: "number",
-        placeholder: String((intake.placeholders && intake.placeholders.building_nrsf) ?? 20000),
-        help: "drives unit count & cost; defaults to 20,000 if blank" },
     ],
     derive: deriveModelPreview,
   }, (values) => {
@@ -278,7 +275,6 @@ function deriveModelPreview(v) {
   const sf = (v.land_sf != null && v.land_sf !== "") ? fmt(v.land_sf) : "—";
   const pos = (x) => (x != null && x !== "" && Number(x) > 0);
   const stories = pos(v.residential_stories) ? Number(v.residential_stories) : 5;
-  const nrsf = pos(v.building_nrsf) ? Number(v.building_nrsf) : 20000;
   const dflt = (real) => (real ? "" : " (default)");
   return [
     { label: "Project (B2)", value: v.deal_name || "—" },
@@ -290,7 +286,6 @@ function deriveModelPreview(v) {
     { label: "Land SF (C12)", value: sf },
     { label: "Land purchase price (S16)", value: pos(v.acquisition_price) ? "$" + fmt(v.acquisition_price) : "— defaults to $150/SF" },
     { label: "Residential stories (C15)", value: stories + dflt(pos(v.residential_stories)) },
-    { label: "Building NRSF (C17)", value: fmt(nrsf) + dflt(pos(v.building_nrsf)) },
     { label: "→ Product", value: lf ? "Large Family" : "Standard (1B)" },
     { label: "→ CRA (C8)", value: cra },
     { label: "→ Bedroom mix", value: mix },
