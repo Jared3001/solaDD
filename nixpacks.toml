@@ -1,5 +1,8 @@
 # Railway build (nixpacks). Pin Python and the start command explicitly so the
 # build does not depend on autodetection.
+# NOTE: the active builder is now the Dockerfile (see railway.json) so this file
+# is unused. LibreOffice for the server-side calc engine is installed via the
+# Dockerfile. Kept for reference / in case the builder is switched back.
 [phases.setup]
 nixPkgs = ["python312", "gcc"]
 

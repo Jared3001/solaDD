@@ -328,6 +328,36 @@ h1, .brand-mark, .tab, .run-btn, label, th, .phase, .kicker {
 .review-preview td.col-answer { text-align: right; font-weight: 600; color: var(--navy); }
 .review-preview .hint { margin-top: 10px; }
 
+/* ---------- scenario picker ---------- */
+.scn-selall { margin-bottom: 10px; font-size: 13px; font-weight: 600; color: var(--gray); }
+.scn-selall label { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; }
+.scn-row {
+  display: grid;
+  grid-template-columns: 20px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-bottom: 7px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.scn-row:hover { border-color: var(--mid); background: #f6f9fc; }
+.scn-row input[type="checkbox"] { cursor: pointer; }
+.scn-name { font-size: 14px; font-weight: 600; color: var(--navy); }
+.scn-tag {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 3px; letter-spacing: .04em;
+}
+.scn-tag-modular { background: #e8f0fb; color: var(--mid); }
+.scn-tag-stick    { background: #fdf3e3; color: #8a5a00; }
+.scn-meta { font-size: 12px; color: var(--gray); grid-column: 2 / -1; margin-top: -4px; }
+@media (max-width: 600px) {
+  .scn-row { grid-template-columns: 20px 1fr; }
+  .scn-tag { display: none; }
+}
+
 /* ---------- rent-comp matrix editor ---------- */
 .comp-beds { display: flex; gap: 16px; flex-wrap: wrap; }
 .comp-beds label { font-weight: 500; font-size: 14px; display: inline-flex; align-items: center; gap: 5px; }

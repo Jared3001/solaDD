@@ -118,9 +118,9 @@ async function genModelFrom(jobId) {
 function openModelReview(jobId, intake) {
   const o = intake.options;
   ReviewEditor.open({
-    subtitle: `${intake.label} — adjust the automated inputs, preview, then generate. Defaults are the DD answers.`,
-    confirmLabel: "Generate Stick + Modular models",
-    previewNote: "Derived live from the inputs (same rules the exporter uses). Land purchase price is required. Residential stories & building NRSF default to the placeholders below in the absence of real numbers; BIPOC & prevailing wage stay analyst-entered in Excel.",
+    subtitle: `${intake.label} — adjust the automated inputs, preview, then select scenarios. Defaults are the DD answers.`,
+    confirmLabel: "Choose scenarios →",
+    previewNote: "Derived live from the inputs (same rules the exporter uses). Residential stories, NRSF, and land price all have sensible defaults when blank; BIPOC & prevailing wage stay analyst-entered in Excel.",
     values: intake.values,
     fields: [
       { id: "deal_name", label: "Deal name", type: "text" },
@@ -130,21 +130,117 @@ function openModelReview(jobId, intake) {
       { id: "resource", label: "Resource area", type: "select", options: o.resource, help: "drives product type & bedroom mix" },
       { id: "neighborhood_change", label: "Neighborhood change area", type: "select", options: o.neighborhood_change, help: "drives CRA eligibility" },
       { id: "land_sf", label: "Land area (SF)", type: "number" },
-      { id: "acquisition_price", label: "Land purchase price ($)", type: "number", required: true,
-        placeholder: "e.g. 10000000", help: "required — written to the model (S16)" },
+      { id: "acquisition_price", label: "Land purchase price ($)", type: "number",
+        placeholder: "e.g. 10000000", help: "defaults to $150/SF of land if blank (written to S16)" },
       { id: "residential_stories", label: "Residential stories", type: "number",
-        placeholder: String((intake.placeholders && intake.placeholders.residential_stories) ?? 3),
-        help: "drives FAR, construction type & cost; defaults to 3 if blank" },
+        placeholder: String((intake.placeholders && intake.placeholders.residential_stories) ?? 5),
+        help: "drives FAR, construction type & cost; defaults to 5 if blank" },
       { id: "building_nrsf", label: "Building NRSF", type: "number",
         placeholder: String((intake.placeholders && intake.placeholders.building_nrsf) ?? 20000),
         help: "drives unit count & cost; defaults to 20,000 if blank" },
     ],
     derive: deriveModelPreview,
   }, (values) => {
-    launch({ method: "POST", headers: { "Content-Type": "application/json" },
-             body: JSON.stringify({ mode: "underwrite", from_job: jobId, overrides: values }) });
+    ScenarioPicker.open(jobId, values);
   });
 }
+
+// ---------- scenario definitions (mirrors Python's run_lihtc_scenarios logic) ----------
+function defaultScenarios(resource) {
+  const lf = resource === "High" || resource === "Highest";
+  const base = [
+    { name: "Modular 5st — 100% 1B",        constr: "Modular", stories: 5,  podium: 1, lf: "No",  sh2B: 0,    sh3B: 0    },
+    { name: "Stick 5st — 50% 1B / 50% 2B",  constr: "Stick",   stories: 5,  podium: 1, lf: "No",  sh2B: 0.5,  sh3B: 0    },
+    { name: "Modular 12st — 100% 1B",        constr: "Modular", stories: 12, podium: 1, lf: "No",  sh2B: 0,    sh3B: 0    },
+  ];
+  if (lf) {
+    base.push(
+      { name: "Modular 5st — Large Family",  constr: "Modular", stories: 5,  podium: 1, lf: "Yes", sh2B: 0.25, sh3B: 0.25 },
+      { name: "Stick 5st — Large Family",    constr: "Stick",   stories: 5,  podium: 1, lf: "Yes", sh2B: 0.25, sh3B: 0.25 },
+      { name: "Modular 12st — Large Family", constr: "Modular", stories: 12, podium: 1, lf: "Yes", sh2B: 0.25, sh3B: 0.25 },
+    );
+  }
+  return base;
+}
+
+const ScenarioPicker = {
+  jobId: null, overrides: null, scenarios: null,
+
+  open(jobId, overrides) {
+    this.jobId = jobId;
+    this.overrides = overrides;
+    const resource = (overrides && overrides.resource) || "";
+    this.scenarios = defaultScenarios(resource);
+
+    const lf = resource === "High" || resource === "Highest";
+    const lfNote = lf
+      ? "Large Family scenarios included because Resource Area is " + resource + ". Mix: 50% 1B · 25% 2B · 25% 3B."
+      : "Large Family scenarios are not shown (Resource Area is not High or Highest).";
+    $("#scn-sub").textContent = lfNote;
+
+    this._render();
+    $("#scn-error").classList.add("hidden");
+    $("#scenario-panel").classList.remove("hidden");
+    $("#scenario-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+  },
+
+  close() { $("#scenario-panel").classList.add("hidden"); },
+
+  _render() {
+    const TAGS = { "Modular": "Modular", "Stick": "Stick" };
+    $("#scn-list").innerHTML = [
+      `<div class="scn-selall"><label><input type="checkbox" id="scn-all" checked> Select / deselect all</label></div>`,
+      ...this.scenarios.map((s, i) => {
+        const sfNote = s.constr === "Modular"
+          ? "1B 497 · 2B 804 · 3B 994 SF"
+          : "1B 475 · 2B 735 · 3B 945 SF";
+        const mixNote = s.lf === "Yes"
+          ? "50% 1B · 25% 2B · 25% 3B"
+          : (s.sh2B > 0 ? `${Math.round((1-s.sh2B-s.sh3B)*100)}% 1B · ${Math.round(s.sh2B*100)}% 2B` : "100% 1B");
+        return `<label class="scn-row">
+          <input type="checkbox" class="scn-chk" data-idx="${i}" checked>
+          <span class="scn-name">${esc(s.name)}</span>
+          <span class="scn-tag scn-tag-${s.constr.toLowerCase()}">${esc(s.constr)}</span>
+          <span class="scn-meta">${esc(s.stories)} stories · podium ${s.podium} · ${esc(mixNote)} · ${esc(sfNote)}</span>
+        </label>`;
+      }),
+    ].join("");
+
+    document.getElementById("scn-all").addEventListener("change", (e) => {
+      $("#scn-list").querySelectorAll(".scn-chk").forEach(cb => { cb.checked = e.target.checked; });
+    });
+  },
+
+  selected() {
+    const checks = [...($("#scn-list").querySelectorAll(".scn-chk"))];
+    return checks
+      .filter(cb => cb.checked)
+      .map(cb => this.scenarios[Number(cb.dataset.idx)]);
+  },
+};
+
+$("#scn-cancel").addEventListener("click", () => ScenarioPicker.close());
+$("#scn-go").addEventListener("click", () => {
+  const sel = ScenarioPicker.selected();
+  const err = $("#scn-error");
+  if (!sel.length) {
+    err.textContent = "Select at least one scenario.";
+    err.classList.remove("hidden");
+    return;
+  }
+  err.classList.add("hidden");
+  ScenarioPicker.close();
+  launch({
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      mode: "lihtc_scenarios",
+      from_job: ScenarioPicker.jobId,
+      overrides: ScenarioPicker.overrides,
+      scenarios: sel,
+    }),
+  });
+});
 
 // JS mirror of uw_logic's derive rules — live preview only; Python writes the file.
 function deriveModelPreview(v) {
@@ -153,7 +249,7 @@ function deriveModelPreview(v) {
   const mix = lf ? "0% Studio · 50% 1B · 25% 2B · 25% 3B" : "100% 1B";
   const sf = (v.land_sf != null && v.land_sf !== "") ? fmt(v.land_sf) : "—";
   const pos = (x) => (x != null && x !== "" && Number(x) > 0);
-  const stories = pos(v.residential_stories) ? Number(v.residential_stories) : 3;
+  const stories = pos(v.residential_stories) ? Number(v.residential_stories) : 5;
   const nrsf = pos(v.building_nrsf) ? Number(v.building_nrsf) : 20000;
   const dflt = (real) => (real ? "" : " (default)");
   return [
@@ -164,7 +260,7 @@ function deriveModelPreview(v) {
     { label: "Resource (C6)", value: v.resource || "—" },
     { label: "Neighborhood change (C7)", value: v.neighborhood_change || "—" },
     { label: "Land SF (C12)", value: sf },
-    { label: "Land purchase price (S16)", value: pos(v.acquisition_price) ? "$" + fmt(v.acquisition_price) : "— required" },
+    { label: "Land purchase price (S16)", value: pos(v.acquisition_price) ? "$" + fmt(v.acquisition_price) : "— defaults to $150/SF" },
     { label: "Residential stories (C15)", value: stories + dflt(pos(v.residential_stories)) },
     { label: "Building NRSF (C17)", value: fmt(nrsf) + dflt(pos(v.building_nrsf)) },
     { label: "→ Product", value: lf ? "Large Family" : "Standard (1B)" },

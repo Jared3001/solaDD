@@ -1,0 +1,11 @@
+.venv/
+.git/
+.claude/
+__pycache__/
+*.pyc
+build/_*
+build/sources/_cache/
+properties/
+template/*_generated.xlsx
+*.log
+.DS_Store

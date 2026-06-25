@@ -510,26 +510,33 @@ def run_underwrite(job):
     if inp.get("overrides"):
         dd, deal_override = _uwl.apply_overrides(dd, inp["overrides"])
 
-    job["phase"] = "Writing the Stick + Modular pro-forma models (preserving macros)…"
-    out_dir = RUN_DIR / f"{job['id']}_models"
-    paths, meta = _underwrite.export(dd, str(_underwrite.DEFAULT_TEMPLATE), out_dir,
-                                     deal_name=deal_override or inp.get("name") or None)
-    deal = paths[0].name.split(" — ")[0]
+    # Build the v28 LIHTC financial model (Modular + Stick construction) from the
+    # DD facts. deal name + meta come from base_cells (what export() used too), so
+    # we no longer generate the legacy Stick + Modular template models at all.
+    job["phase"] = "Building the v28 LIHTC financial model…"
+    _base, meta = _uwl.base_cells(dd)
+    deal = deal_override or inp.get("name") or _base.get(("Pro_Forma", "B2")) or "Untitled Deal"
     job["label"] = f"{deal} — financial model"
 
-    # Bundle the two .xlsm into one download.
+    import modularz_calc as _mz
+    v28_files = []  # (arcname, bytes)
+    for _m in ("Modular", "Stick"):
+        v28_files.append((f"{deal} — LIHTC v28 ({_m}).xlsm",
+                          _mz.build_from_dd(dd, method=_m, deal_name=deal)))
+
     import zipfile
     zip_path = RUN_DIR / f"{job['id']}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-        for p in paths:
-            z.write(p, p.name)
+        for arc, blob in v28_files:
+            z.writestr(arc, blob)
 
     job["underwrite"] = {
         "deal": deal,
         "product": meta.get("product"),
         "resource": meta.get("resource_mapped"),
         "flags": meta.get("flags", []),
-        "models": [p.name for p in paths],
+        "default_model": v28_files[0][0],
+        "models": [arc for arc, _ in v28_files],
         "inputs": {k: _jsonable(v) for k, v in dd.items()},
         "envelope_defaults": {
             "residential_stories": _jsonable(dd.get("residential_stories")) or _uwl.DEFAULT_STORIES,
@@ -540,6 +547,63 @@ def run_underwrite(job):
     job["total"] = job["completed"] = 1
     job["file"] = str(zip_path)
     job["filename"] = f"{_safe_name(deal)}_models.zip"
+    job["phase"] = "Complete"
+
+
+# --------------------------------------------------------------------------- #
+# LIHTC scenario batch — selected scenario list -> one .xlsm each -> zip
+# --------------------------------------------------------------------------- #
+def run_lihtc_scenarios(job):
+    inp = job["input"]
+
+    if inp.get("dd_bytes"):
+        dd_path = RUN_DIR / f"{job['id']}_dd.xlsx"
+        dd_path.write_bytes(inp["dd_bytes"])
+    elif inp.get("from_job"):
+        prior = get_job(inp["from_job"])
+        if not prior or not prior.get("file"):
+            raise RuntimeError("Source checklist not found (it may have expired) — re-run the DD or upload the file.")
+        dd_path = Path(prior["file"])
+        job["label"] = (prior.get("label") or "") + " — LIHTC scenarios"
+    else:
+        raise RuntimeError("No DD checklist provided.")
+
+    job["phase"] = "Reading the DD checklist…"
+    dd = _underwrite.read_dd(dd_path)
+
+    import uw_logic as _uwl
+    deal_override = None
+    if inp.get("overrides"):
+        dd, deal_override = _uwl.apply_overrides(dd, inp["overrides"])
+
+    _base, _meta = _uwl.base_cells(dd)
+    deal = deal_override or inp.get("name") or _base.get(("Pro_Forma", "B2")) or "Untitled Deal"
+    job["label"] = f"{deal} — LIHTC scenarios"
+
+    selected = inp.get("scenarios") or []
+    if not selected:
+        raise RuntimeError("No scenarios were selected.")
+
+    job["total"] = len(selected)
+    job["completed"] = 0
+
+    import modularz_calc as _mz
+    import zipfile
+    zip_path = RUN_DIR / f"{job['id']}.zip"
+    scn_files = []
+    for scn in selected:
+        job["phase"] = f"Building {scn['name']}…"
+        blob = _mz.build_for_scenario(dd, scn, deal_name=deal)
+        scn_files.append((f"{deal} — {scn['name']}.xlsm", blob))
+        job["completed"] += 1
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for arc, blob in scn_files:
+            z.writestr(arc, blob)
+
+    job["file"] = str(zip_path)
+    job["filename"] = f"{_safe_name(deal)}_scenarios.zip"
+    job["total"] = job["completed"] = len(scn_files)
     job["phase"] = "Complete"
 
 
@@ -885,6 +949,7 @@ def create_job(kind, payload, actor=None):
 
 
 _RUNNERS = {"single": run_single, "assemblage": run_assemblage, "underwrite": run_underwrite,
+            "lihtc_scenarios": run_lihtc_scenarios,
             "comps": run_comps, "comps_grid": run_comps_grid}
 
 

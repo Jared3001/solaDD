@@ -45,7 +45,7 @@ MODULAR_SIZES = {"L5": 804, "L6": 994}                # 2B / 3B avg NRSF; Stick 
 # model. So the exporter seeds a generic building the analyst overrides with the
 # real envelope. Writing C17 as a literal intentionally replaces the template's
 # lot x FAR formula (=D12*43560*C16*0.8) — NRSF becomes a hand input, not derived.
-DEFAULT_STORIES = 3        # Pro_Forma!C15 (residential stories) — drives the C9 type formula
+DEFAULT_STORIES = 5        # Pro_Forma!C15 (residential stories) — drives the C9 type formula
 DEFAULT_NRSF    = 20000    # Pro_Forma!C17 (building NRSF)
 
 

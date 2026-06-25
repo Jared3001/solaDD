@@ -968,6 +968,272 @@ function updateModelFromUI() {'''
     html = html.replace("in Backend tab", "in Inputs tab")
     html = html.replace("· see Backend", "· see Inputs")
 
+    # ====================================================================
+    # 13. COWORKER FEEDBACK FIXES (Nick Caton, 2026-06-23)
+    #     (a) Cost x Rent sensi -> YoC not MoIC
+    #     (b) $15M / 750k shorthand parsing on the land inputs
+    #     (c) save / restore previous underwritings
+    #     (d) reconcile the Full Proforma tab to the institutional workbook
+    #     (e) clearer max-supportable land labeling
+    # ====================================================================
+
+    # 13a. Cost x Rent sensitivity table: output Yield on Cost, not MoIC. ----
+    html = html.replace(
+        "        // Hard Cost vs Rent/Unit -> MOIC",
+        "        // Hard Cost vs Rent/Unit -> Yield on Cost (per coworker note)", 1)
+    html = html.replace("MOIC<br>Hard Cost × Rent", "YoC<br>Hard Cost × Rent", 1)
+    html = html.replace(">${fNum(res.moic, 2)}x</td>", ">${fPct(res.yoc, 1)}</td>", 1)
+
+    # 13b. parseMoney: honor k/m/mm shorthand so "$15M" == 15,000,000. The chat
+    #      parser already did this; the manual land fields did not. -----------
+    parse_money = '''// Parse a money string that may use k/m/b shorthand: "$15M"->15000000,
+// "750k"->750000, "15,000,000"->15000000, "1.2mm"->1200000. 0 if nothing parses.
+function parseMoney(raw) {
+    const s = (raw == null ? '' : String(raw)).trim().toLowerCase().replace(/[$,\\s]/g, '');
+    const m = s.match(/^(-?\\d*\\.?\\d+)\\s*(k|thousand|m|mm|million|b|billion)?$/);
+    if (!m) { const f = parseFloat(s.replace(/[^0-9.\\-]/g, '')); return isFinite(f) ? f : 0; }
+    let n = parseFloat(m[1]); if (!isFinite(n)) return 0;
+    const u = m[2] || '';
+    if (u === 'k' || u === 'thousand') n *= 1e3;
+    else if (u === 'm' || u === 'mm' || u === 'million') n *= 1e6;
+    else if (u === 'b' || u === 'billion') n *= 1e9;
+    return n;
+}
+
+const fLandDollar = '''
+    if html.count("const fLandDollar = ") != 1:
+        sys.exit("13b: fLandDollar anchor not found uniquely")
+    html = html.replace("const fLandDollar = ", parse_money, 1)
+
+    html = html.replace(
+        "    const v = parseFloat((document.getElementById('inp-land-dollar').value + '').replace(/[^0-9.]/g, '')) || 0;",
+        "    const v = parseMoney(document.getElementById('inp-land-dollar').value);", 1)
+    html = html.replace(
+        "    model.landCost = parseFloat(document.getElementById('be-land').value) || model.landCost;",
+        "    model.landCost = parseMoney(document.getElementById('be-land').value) || model.landCost;", 1)
+    html = html.replace(
+        "    const __tppu = parseFloat(document.getElementById('be-target-ppu').value);",
+        "    const __tppu = parseMoney(document.getElementById('be-target-ppu').value);", 1)
+    # Let the backend currency fields accept shorthand (number inputs reject "M").
+    html = html.replace(
+        '<li><span>Land Acquisition</span><input type="number" id="be-land" oninput="updateFromBackend()"></li>',
+        '<li><span>Land Acquisition</span><input type="text" inputmode="numeric" id="be-land" oninput="updateFromBackend()" placeholder="e.g. 15M or 15,000,000"></li>', 1)
+    html = html.replace(
+        '<input type="number" step="5000" min="0" id="be-target-ppu" oninput="updateFromBackend()">',
+        '<input type="text" inputmode="numeric" id="be-target-ppu" oninput="updateFromBackend()" placeholder="e.g. 350k">', 1)
+
+    # 13c. SESSION SAVE / RESTORE — localStorage. Autosaves the working deal so a
+    #      reload never loses it, plus named snapshots reloadable from a menu. ---
+    sess_ctl = '''<div class="session-ctl">
+            <button class="btn-session" onclick="toggleSessionMenu(event)" title="Save the current underwriting or reload a previous one">
+                <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.3 2.6L3 8"></path><path d="M3 3v5h5"></path></svg>
+                Sessions
+            </button>
+            <div class="session-menu hidden" id="sessionMenu"></div>
+        </div>
+
+        <button class="btn-generate" onclick="switchTab('proforma'); generateProforma();">'''
+    gen_btn = '<button class="btn-generate" onclick="switchTab(\'proforma\'); generateProforma();">'
+    if html.count(gen_btn) != 1:
+        sys.exit("13c: generate-button anchor not found uniquely")
+    html = html.replace(gen_btn, sess_ctl, 1)
+
+    sess_js = '''const MZ_SESS_KEY = 'modularz_sessions_v1';
+let __sessSaveTimer = null;
+function mzLoadSessions() { try { return JSON.parse(localStorage.getItem(MZ_SESS_KEY) || '[]'); } catch (e) { return []; } }
+function mzStoreSessions(list) { try { localStorage.setItem(MZ_SESS_KEY, JSON.stringify(list.slice(0, 30))); } catch (e) {} }
+function mzSessLabel(s) {
+    const d = new Date(s.ts);
+    const when = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    return (s.name || 'Untitled') + ' \\u00b7 ' + when;
+}
+function esc(s) { return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// Debounced autosave of the working deal (id 'auto') so a reload/return is safe.
+function autoSaveSession() {
+    if (!model || !model.units) return;
+    clearTimeout(__sessSaveTimer);
+    __sessSaveTimer = setTimeout(() => {
+        const list = mzLoadSessions().filter(s => s.id !== 'auto');
+        list.unshift({ id: 'auto', name: (model.projectName || 'Working deal') + ' (autosave)', ts: Date.now(), model: JSON.parse(JSON.stringify(model)) });
+        mzStoreSessions(list);
+    }, 700);
+}
+function saveNamedSession() {
+    if (!model || !model.units) { addMsg('Load a deal before saving a session.', 'system'); return; }
+    const name = prompt('Name this underwriting:', model.projectName || 'Untitled deal');
+    if (name == null) return;
+    const list = mzLoadSessions();
+    list.unshift({ id: 'sess_' + Date.now(), name: (name.trim() || 'Untitled'), ts: Date.now(), model: JSON.parse(JSON.stringify(model)) });
+    mzStoreSessions(list);
+    renderSessionMenu();
+    addMsg('\\u2713 Saved session \\u201c' + esc(name.trim() || 'Untitled') + '\\u201d. Reload it anytime from the Sessions menu.', 'system', true);
+}
+function restoreSession(id) {
+    const s = mzLoadSessions().find(x => x.id === id);
+    if (!s) return;
+    model = Object.assign({}, model, s.model);
+    try { const __rl = __residualLandForPPU(model.targetPPU || 350000); if (__rl != null) __maxLand = __rl; } catch (e) {}
+    snapshot = runUnderwriting(model);
+    if (model.projectName) document.getElementById('projName').innerHTML = esc(model.projectName);
+    if (model.address) document.getElementById('projSub').innerHTML = esc(model.address);
+    updateUI({ flash: true });
+    const menu = document.getElementById('sessionMenu'); if (menu) menu.classList.add('hidden');
+    addMsg('\\u21a9 Restored \\u201c' + esc(s.name || 'session') + '\\u201d.', 'system', true);
+}
+function deleteSession(id, ev) {
+    if (ev) ev.stopPropagation();
+    mzStoreSessions(mzLoadSessions().filter(x => x.id !== id));
+    renderSessionMenu();
+}
+function renderSessionMenu() {
+    const menu = document.getElementById('sessionMenu'); if (!menu) return;
+    const list = mzLoadSessions();
+    let h = '<div class="session-menu-head"><span>Saved underwritings</span><button onclick="saveNamedSession()">+ Save current</button></div>';
+    if (!list.length) h += '<div class="session-empty">No saved sessions yet. Load a deal, then \\u201cSave current.\\u201d</div>';
+    else h += list.map(s => '<div class="session-row" onclick="restoreSession(\\'' + s.id + '\\')"><span class="session-name">' + esc(mzSessLabel(s)) + '</span><button class="session-del" title="Delete" onclick="deleteSession(\\'' + s.id + '\\', event)">\\u00d7</button></div>').join('');
+    menu.innerHTML = h;
+}
+function toggleSessionMenu(ev) {
+    if (ev) ev.stopPropagation();
+    const menu = document.getElementById('sessionMenu'); if (!menu) return;
+    renderSessionMenu();
+    menu.classList.toggle('hidden');
+}
+document.addEventListener('click', (e) => {
+    const m = document.getElementById('sessionMenu');
+    const ctl = e.target.closest && e.target.closest('.session-ctl');
+    if (m && !ctl) m.classList.add('hidden');
+});
+// On load: if a working deal was autosaved and nothing is loaded, offer it back.
+setTimeout(() => {
+    try {
+        const auto = mzLoadSessions().find(s => s.id === 'auto');
+        if (auto && (!model || !model.units)) {
+            addMsg('You have a saved session: <b>' + esc(auto.name || 'Working deal') + '</b> (' + new Date(auto.ts).toLocaleString() + '). <a href="#" onclick="restoreSession(\\'auto\\'); return false;">Restore it</a> or open the Sessions menu (top right).', 'system', true);
+        }
+    } catch (e) {}
+}, 500);
+
+function generateProforma() {'''
+    if html.count("function generateProforma() {") != 1:
+        sys.exit("13c: generateProforma anchor not found uniquely")
+    html = html.replace("function generateProforma() {", sess_js, 1)
+
+    # Hook autosave into the central redraw (the 4-space land-render block in updateUI).
+    ui_hook = "    renderMaxLandDisplay();\n    renderLandLever();"
+    if html.count(ui_hook) != 1:
+        sys.exit("13c: updateUI 4-space land-render hook not found uniquely")
+    html = html.replace(ui_hook, ui_hook + "\n    autoSaveSession();", 1)
+
+    # 13d. Reconcile the Full Proforma tab to the institutional workbook (same
+    #      engine as the .xlsx download) so the tab can't disagree with Excel. --
+    pf_recon = '''    const r = runUnderwriting(model);
+    // Reconcile the headline returns + capital stack to the institutional
+    // workbook (same engine as the .xlsx download) so this tab can't disagree
+    // with the downloaded model. Falls back to the JS projection if the engine
+    // isn't ready. The year-by-year schedule below stays an indicative JS build.
+    const __eng = (typeof computeEngineReturns === 'function') ? computeEngineReturns(model) : null;
+    if (__eng) {
+        if (__eng.irr != null)      r.irr = __eng.irr;
+        if (__eng.moic != null)     r.moic = __eng.moic;
+        if (__eng.coc != null)      r.avgCoc = __eng.coc;
+        if (__eng.yoc != null)      r.yoc = __eng.yoc;
+        if (__eng.spread != null)   r.spread = __eng.spread;
+        if (__eng.noi != null)      r.noi = __eng.noi;
+        if (__eng.tdc != null)      r.tdc = __eng.tdc;
+        if (__eng.ppu != null)      r.ppu = __eng.ppu;
+        if (__eng.permLoan != null) r.loanAmt = __eng.permLoan;
+        if (__eng.equity != null)   r.equity = __eng.equity;
+        if (__eng.dscr != null)     r.dscr = __eng.dscr;
+    }'''
+    if html.count("    const r = runUnderwriting(model);") != 1:
+        sys.exit("13d: generateProforma runUnderwriting anchor not found uniquely")
+    html = html.replace("    const r = runUnderwriting(model);", pf_recon, 1)
+
+    # Reconciliation note under the proforma title.
+    doc_sub = '<div class="doc-sub">${model.address} · ${model.units} units · Generated ${date}</div>'
+    doc_recon = doc_sub + '''
+            <div class="doc-recon ${__eng ? 'ok' : 'warn'}">${__eng
+                ? '\\u2713 Returns, TDC, equity, loan &amp; NOI reconciled to the institutional workbook \\u2014 these match the Excel download. The year-by-year schedule is an indicative projection.'
+                : '\\u26a0 Workbook engine not loaded \\u2014 figures are the quick JS estimate and may differ from the Excel download.'}</div>'''
+    if html.count(doc_sub) != 1:
+        sys.exit("13d: proforma doc-sub anchor not found uniquely")
+    html = html.replace(doc_sub, doc_recon, 1)
+
+    # Dashboard engine-status strip above the KPI grid + the function that fills it.
+    status_el = '<div class="engine-status" id="engineStatus"></div>\n        <!-- KPI GRID -->'
+    if html.count("<!-- KPI GRID -->") != 1:
+        sys.exit("13d: KPI GRID anchor not found uniquely")
+    html = html.replace("<!-- KPI GRID -->", status_el, 1)
+
+    status_fn = '''function renderEngineStatus(reconciled) {
+    const el = document.getElementById('engineStatus'); if (!el) return;
+    if (!model || !model.units) { el.textContent = ''; el.className = 'engine-status'; return; }
+    if (reconciled) { el.innerHTML = '<span class="dot"></span> Live figures reconciled to the institutional workbook (match the Excel download).'; el.className = 'engine-status ok'; }
+    else { el.innerHTML = '<span class="dot"></span> Quick estimate \\u2014 reconciling to the institutional workbook\\u2026'; el.className = 'engine-status warn'; }
+}
+
+function applyEngineKPIs() {'''
+    if html.count("function applyEngineKPIs() {") != 1:
+        sys.exit("13d: applyEngineKPIs anchor not found uniquely")
+    html = html.replace("function applyEngineKPIs() {", status_fn, 1)
+    html = html.replace(
+        "    if (k.equity != null) set('equity', fMoneyM(k.equity));",
+        "    if (k.equity != null) set('equity', fMoneyM(k.equity));\n    renderEngineStatus(true);", 1)
+    html = html.replace(
+        "    if (!__engineReady() || !model.units || !model.nrsf) return;",
+        "    if (!__engineReady() || !model.units || !model.nrsf) { renderEngineStatus(false); return; }", 1)
+
+    # 13e. Make it unmistakable the default land is the CEILING, not a real price.
+    land_range = '<div class="lever-range"><span>$0</span><span class="land-mark">max</span><span>120%</span></div>'
+    land_hint = land_range + '\n                    <div class="land-hint">Defaults to the <b>max you could pay</b> (ceiling @ target $/unit). Enter the actual asking / contract price to see true returns.</div>'
+    if html.count(land_range) != 1:
+        sys.exit("13e: land lever-range anchor not found uniquely")
+    html = html.replace(land_range, land_hint, 1)
+
+    # 13f. Hint that the per-unit target (the max-land basis) is editable in Inputs.
+    maxland_figs = '<div class="maxland-figs"><span class="maxland-val" id="maxland-val">&mdash;</span><span class="maxland-pu" id="maxland-pu"></span></div>'
+    maxland_hint = maxland_figs + '\n                    <div class="maxland-hint">Per-unit target is editable in the <b>Inputs</b> tab (Hard Costs → Target Cost / Unit).</div>'
+    if html.count(maxland_figs) != 1:
+        sys.exit("13f: maxland-figs anchor not found uniquely")
+    html = html.replace(maxland_figs, maxland_hint, 1)
+
+    # 13c/d/e/f CSS.
+    fb_css = '''
+/* ====== coworker-feedback fixes: sessions, engine status, land hint, recon note ====== */
+.session-ctl { position: relative; }
+.btn-session { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-muted); background: var(--bg-subtle); border: 1px solid var(--border-strong); border-radius: 6px; padding: 7px 11px; cursor: pointer; }
+.btn-session:hover { color: var(--text-main); border-color: var(--accent); }
+.session-menu { position: absolute; top: calc(100% + 6px); right: 0; width: 290px; max-height: 360px; overflow-y: auto; background: var(--bg-panel, var(--bg-subtle)); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); z-index: 200; padding: 6px; }
+.session-menu.hidden { display: none; }
+.session-menu-head { display: flex; align-items: center; justify-content: space-between; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); padding: 6px 8px 8px; }
+.session-menu-head button { font-size: 11px; font-weight: 600; color: var(--accent); background: none; border: none; cursor: pointer; }
+.session-empty { font-size: 12px; color: var(--text-faint); padding: 8px 8px 12px; line-height: 1.4; }
+.session-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; border-radius: 6px; cursor: pointer; }
+.session-row:hover { background: var(--bg-subtle); }
+.session-name { font-size: 12px; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-del { font-size: 15px; line-height: 1; color: var(--text-faint); background: none; border: none; cursor: pointer; padding: 0 4px; }
+.session-del:hover { color: #d9534f; }
+.engine-status { display: flex; align-items: center; gap: 7px; font-size: 11.5px; margin: 0 0 12px; padding: 6px 10px; border-radius: 6px; }
+.engine-status:empty { display: none; }
+.engine-status .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.engine-status.ok { color: var(--text-muted); background: rgba(46,160,67,0.10); border: 1px solid rgba(46,160,67,0.30); }
+.engine-status.ok .dot { background: #2ea043; }
+.engine-status.warn { color: var(--text-muted); background: rgba(224,162,55,0.10); border: 1px solid rgba(224,162,55,0.30); }
+.engine-status.warn .dot { background: var(--accent); }
+.land-hint { font-size: 10px; line-height: 1.4; color: var(--text-faint); margin-top: 6px; }
+.land-hint b { color: var(--text-muted); }
+.maxland-hint { font-size: 9.5px; line-height: 1.35; color: var(--text-faint); margin-top: 5px; }
+.maxland-hint b { color: var(--text-muted); font-weight: 600; }
+.doc-recon { font-size: 11px; line-height: 1.45; margin-top: 8px; padding: 7px 11px; border-radius: 6px; }
+.doc-recon.ok { color: var(--text-muted); background: rgba(46,160,67,0.08); border: 1px solid rgba(46,160,67,0.25); }
+.doc-recon.warn { color: var(--text-muted); background: rgba(224,162,55,0.08); border: 1px solid rgba(224,162,55,0.25); }
+</style>'''
+    if html.count("</style>") != 1:
+        sys.exit("13: feedback CSS </style> anchor not found uniquely")
+    html = html.replace("</style>", fb_css, 1)
+
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:
         f.write(html)

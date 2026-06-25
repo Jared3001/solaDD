@@ -161,6 +161,108 @@ def modularz():
     return render_template("modularz.html", gemini_key=GEMINI_API_KEY)
 
 
+@app.get("/modularz/v28")
+@login_required
+def modularz_v28():
+    """LIHTC v28 underwriting UI — computed server-side by the workbook itself."""
+    from web import modularz_calc
+    try:
+        counties = modularz_calc.counties()
+    except Exception:  # noqa: BLE001
+        counties = []
+    return render_template(
+        "modularz_v28.html",
+        counties=counties,
+        gap_options=modularz_calc.GAP_FINANCING_OPTIONS,
+    )
+
+
+@app.get("/api/modularz/health")
+@login_required
+def api_modularz_health():
+    """Confirms LibreOffice is installed and can recalc the v28 model. Used to
+    verify the server-side calc engine after a deploy."""
+    try:
+        from web import modularz_calc
+        return jsonify(modularz_calc.selftest())
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/modularz/research")
+@login_required
+def api_modularz_research():
+    """Resolve a bare address into v28 inputs (county + land estimate) via Gemini."""
+    data = request.get_json(silent=True) or {}
+    addr = (data.get("address") or "").strip()
+    if not addr:
+        return jsonify({"ok": False, "error": "Enter an address to research."}), 400
+    try:
+        from web import modularz_calc
+        res = modularz_calc.research_address(addr)
+        return jsonify({"ok": True, **res})
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/modularz/download")
+@login_required
+def api_modularz_download():
+    """Return the v28 workbook (.xlsm) with the current inputs patched in, set to
+    recalc on open in Excel — the underwritten model as a downloadable file."""
+    data = request.get_json(silent=True) or {}
+    inputs = data.get("inputs") or {}
+    try:
+        from web import modularz_calc
+        num, txt = modularz_calc.split_friendly(inputs)
+        blob = modularz_calc.build_download(num, txt)
+        name = (inputs.get("project_name") or "LIHTC").strip().replace(" ", "_")[:40] or "LIHTC"
+        from flask import Response
+        return Response(
+            blob,
+            mimetype="application/vnd.ms-excel.sheet.macroEnabled.12",
+            headers={"Content-Disposition": f'attachment; filename="{name}_underwritten_v28.xlsm"'},
+        )
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/modularz/extract-om")
+@login_required
+def api_modularz_extract_om():
+    """Extract deal facts from an uploaded OM PDF and map them onto v28 inputs
+    (address, acquisition price -> land, lot SF, county)."""
+    om = request.files.get("om")
+    if not om or not om.filename:
+        return jsonify({"ok": False, "error": "No OM file uploaded."}), 400
+    try:
+        from web import om_extract, modularz_calc
+        raw = om_extract.extract(om.read(), om.filename)
+        fields = {f["field_id"]: f["value"] for f in raw}
+        return jsonify({"ok": True, "inputs": modularz_calc.om_fields_to_inputs(fields), "fields": fields})
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/modularz/calc")
+@login_required
+def api_modularz_calc():
+    """Server-side recalculation of the LIHTC v28 workbook via LibreOffice.
+
+    Body: {"inputs": {friendly_name: value, ...}}  (see modularz_calc.INPUT_CELLS)
+    Returns: {"outputs": {label: value, ...}}
+    """
+    data = request.get_json(silent=True) or {}
+    inputs = data.get("inputs") or {}
+    try:
+        from web import modularz_calc
+        outputs = modularz_calc.calc_friendly(inputs)
+        return jsonify({"ok": True, "outputs": outputs})
+    except Exception as e:  # noqa: BLE001 — surface calc failures to the client
+        app.logger.exception("modularz calc failed")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.post("/api/run")
 @login_required
 def api_run():
@@ -222,6 +324,37 @@ def api_run():
         if isinstance(ov, dict) and ov:
             payload["overrides"] = ov
         jid = jobs.create_job("underwrite", payload, actor=_actor())
+        return jsonify({"job_id": jid})
+    if mode == "lihtc_scenarios":
+        # Generate one .xlsm per selected scenario, zip, return download.
+        # Accepts the same source as underwrite (uploaded DD or from_job), plus
+        # "scenarios" (list of scenario dicts) and optional "overrides".
+        payload = {"name": (data.get("name") or "").strip() or None}
+        dd_file = request.files.get("dd") if request.files else None
+        if dd_file and dd_file.filename:
+            dd_bytes = dd_file.read()
+            if not dd_bytes:
+                return jsonify({"error": "The uploaded checklist is empty."}), 400
+            payload["dd_bytes"] = dd_bytes
+            payload["dd_name"] = dd_file.filename
+        elif data.get("from_job"):
+            payload["from_job"] = data.get("from_job")
+        else:
+            return jsonify({"error": "Upload a DD checklist (.xlsx), or generate from a completed run."}), 400
+        ov = data.get("overrides")
+        if isinstance(ov, str) and ov:
+            import json as _json
+            try:
+                ov = _json.loads(ov)
+            except ValueError:
+                ov = None
+        if isinstance(ov, dict) and ov:
+            payload["overrides"] = ov
+        scns = data.get("scenarios")
+        if not scns:
+            return jsonify({"error": "No scenarios selected."}), 400
+        payload["scenarios"] = scns
+        jid = jobs.create_job("lihtc_scenarios", payload, actor=_actor())
         return jsonify({"job_id": jid})
     if mode == "comps":
         address = (data.get("address") or "").strip()

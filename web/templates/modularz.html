@@ -242,6 +242,35 @@ body { flex-direction: column; }
 .land-dollar-row input:focus { outline: none; border-color: var(--accent); }
 .land-pu { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); white-space: nowrap; }
 .lever-land .lever-range .land-mark { color: var(--accent); }
+
+/* ====== coworker-feedback fixes: sessions, engine status, land hint, recon note ====== */
+.session-ctl { position: relative; }
+.btn-session { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-muted); background: var(--bg-subtle); border: 1px solid var(--border-strong); border-radius: 6px; padding: 7px 11px; cursor: pointer; }
+.btn-session:hover { color: var(--text-main); border-color: var(--accent); }
+.session-menu { position: absolute; top: calc(100% + 6px); right: 0; width: 290px; max-height: 360px; overflow-y: auto; background: var(--bg-panel, var(--bg-subtle)); border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.25); z-index: 200; padding: 6px; }
+.session-menu.hidden { display: none; }
+.session-menu-head { display: flex; align-items: center; justify-content: space-between; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-faint); padding: 6px 8px 8px; }
+.session-menu-head button { font-size: 11px; font-weight: 600; color: var(--accent); background: none; border: none; cursor: pointer; }
+.session-empty { font-size: 12px; color: var(--text-faint); padding: 8px 8px 12px; line-height: 1.4; }
+.session-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; border-radius: 6px; cursor: pointer; }
+.session-row:hover { background: var(--bg-subtle); }
+.session-name { font-size: 12px; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-del { font-size: 15px; line-height: 1; color: var(--text-faint); background: none; border: none; cursor: pointer; padding: 0 4px; }
+.session-del:hover { color: #d9534f; }
+.engine-status { display: flex; align-items: center; gap: 7px; font-size: 11.5px; margin: 0 0 12px; padding: 6px 10px; border-radius: 6px; }
+.engine-status:empty { display: none; }
+.engine-status .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.engine-status.ok { color: var(--text-muted); background: rgba(46,160,67,0.10); border: 1px solid rgba(46,160,67,0.30); }
+.engine-status.ok .dot { background: #2ea043; }
+.engine-status.warn { color: var(--text-muted); background: rgba(224,162,55,0.10); border: 1px solid rgba(224,162,55,0.30); }
+.engine-status.warn .dot { background: var(--accent); }
+.land-hint { font-size: 10px; line-height: 1.4; color: var(--text-faint); margin-top: 6px; }
+.land-hint b { color: var(--text-muted); }
+.maxland-hint { font-size: 9.5px; line-height: 1.35; color: var(--text-faint); margin-top: 5px; }
+.maxland-hint b { color: var(--text-muted); font-weight: 600; }
+.doc-recon { font-size: 11px; line-height: 1.45; margin-top: 8px; padding: 7px 11px; border-radius: 6px; }
+.doc-recon.ok { color: var(--text-muted); background: rgba(46,160,67,0.08); border: 1px solid rgba(46,160,67,0.25); }
+.doc-recon.warn { color: var(--text-muted); background: rgba(224,162,55,0.08); border: 1px solid rgba(224,162,55,0.25); }
 </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <!-- Formula engine: runs the proforma's own formulas in-browser so the dashboard
@@ -314,6 +343,14 @@ body { flex-direction: column; }
             <span>Compare</span>
         </div>
 
+        <div class="session-ctl">
+            <button class="btn-session" onclick="toggleSessionMenu(event)" title="Save the current underwriting or reload a previous one">
+                <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.3 2.6L3 8"></path><path d="M3 3v5h5"></path></svg>
+                Sessions
+            </button>
+            <div class="session-menu hidden" id="sessionMenu"></div>
+        </div>
+
         <button class="btn-generate" onclick="switchTab('proforma'); generateProforma();">
             <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
             Generate
@@ -323,6 +360,7 @@ body { flex-direction: column; }
     <!-- ============= DASHBOARD TAB ============= -->
     <div class="tab-body" id="tab-dashboard">
 
+        <div class="engine-status" id="engineStatus"></div>
         <!-- KPI GRID -->
         <section class="kpi-grid">
             <div class="kpi-card featured">
@@ -387,6 +425,7 @@ body { flex-direction: column; }
                 <div class="maxland-box" id="maxland-box" title="The highest land price that still hits the all-in cost-per-unit target. Buy at or below this and the deal pencils (dev spread >= 0); pay more and returns go negative. Change the target in the Inputs tab (Hard Costs).">
                     <div class="maxland-label">Max Land Price <span class="maxland-sub">to pencil @ <span id="maxland-target">$350K</span>/unit</span></div>
                     <div class="maxland-figs"><span class="maxland-val" id="maxland-val">&mdash;</span><span class="maxland-pu" id="maxland-pu"></span></div>
+                    <div class="maxland-hint">Per-unit target is editable in the <b>Inputs</b> tab (Hard Costs → Target Cost / Unit).</div>
                 </div>
 
                 <!-- LAND PURCHASE PRICE LEVER (mechanism 2): $ field + %-of-max slider, kept in sync -->
@@ -395,6 +434,7 @@ body { flex-direction: column; }
                     <div class="land-dollar-row"><span class="land-dollar-prefix">$</span><input type="text" inputmode="numeric" id="inp-land-dollar" oninput="updateLandFromDollar()" onblur="renderLandLever()" placeholder="land $"><span class="land-pu" id="land-pu"></span></div>
                     <input type="range" id="inp-land" min="0" max="120" step="1" value="100" oninput="updateLandFromSlider()">
                     <div class="lever-range"><span>$0</span><span class="land-mark">max</span><span>120%</span></div>
+                    <div class="land-hint">Defaults to the <b>max you could pay</b> (ceiling @ target $/unit). Enter the actual asking / contract price to see true returns.</div>
                 </div>
 
                 <div class="lever-group">
@@ -492,8 +532,8 @@ body { flex-direction: column; }
             <div class="backend-panel">
                 <h4>Hard Costs</h4>
                 <ul class="detail-list">
-                    <li title="The all-in cost-per-unit target that sets the Max Land Price ceiling on the Dashboard. Lower it to be more conservative; raise it to support a higher land price."><span>Target Cost / Unit <span style="color: var(--text-faint); font-size: 10px;">(max-land basis)</span></span><input type="number" step="5000" min="0" id="be-target-ppu" oninput="updateFromBackend()"></li>
-                    <li><span>Land Acquisition</span><input type="number" id="be-land" oninput="updateFromBackend()"></li>
+                    <li title="The all-in cost-per-unit target that sets the Max Land Price ceiling on the Dashboard. Lower it to be more conservative; raise it to support a higher land price."><span>Target Cost / Unit <span style="color: var(--text-faint); font-size: 10px;">(max-land basis)</span></span><input type="text" inputmode="numeric" id="be-target-ppu" oninput="updateFromBackend()" placeholder="e.g. 350k"></li>
+                    <li><span>Land Acquisition</span><input type="text" inputmode="numeric" id="be-land" oninput="updateFromBackend()" placeholder="e.g. 15M or 15,000,000"></li>
                     <li><span style="color: var(--text-muted); font-size: 11px;">Modular $/Unit · 1-BR</span><input type="number" id="be-mod1" oninput="updateFromBackend()" style="font-size: 11px;"></li>
                     <li><span style="color: var(--text-muted); font-size: 11px;">Modular $/Unit · 2-BR</span><input type="number" id="be-mod2" oninput="updateFromBackend()" style="font-size: 11px;"></li>
                     <li><span style="color: var(--text-muted); font-size: 11px;">Modular $/Unit · 3-BR</span><input type="number" id="be-mod3" oninput="updateFromBackend()" style="font-size: 11px;"></li>
@@ -1380,6 +1420,7 @@ function updateUI(opts = {}) {
     document.getElementById('inp-ltc').value = model.permLtc * 100;
     renderMaxLandDisplay();
     renderLandLever();
+    autoSaveSession();
 
     // Backend tab
     document.getElementById('be-addr').innerText = model.address || '—';
@@ -1697,10 +1738,10 @@ function buildSensiTableJS() {
         });
         html += '</tbody></table>';
     } else if (activeSensi === 'revenue') {
-        // Hard Cost vs Rent/Unit -> MOIC
+        // Hard Cost vs Rent/Unit -> Yield on Cost (per coworker note)
         const hcSteps = [-25, -10, 0, 10, 25];
         const rentSteps = [-150, -75, 0, 75, 150];
-        html = '<table class="sensi-table"><thead><tr><th class="corner">MOIC<br>Hard Cost × Rent</th>';
+        html = '<table class="sensi-table"><thead><tr><th class="corner">YoC<br>Hard Cost × Rent</th>';
         rentSteps.forEach(r => html += `<th>$${model.rentPerUnit + r}/u</th>`);
         html += '</tr></thead><tbody>';
         hcSteps.forEach(hc => {
@@ -1711,7 +1752,7 @@ function buildSensiTableJS() {
                 const tm = { ...model, hardCostPerSf: h, rentPerUnit: rent };
                 const res = runUnderwriting(tm);
                 const isCenter = (hc === 0 && r === 0);
-                html += `<td class="${isCenter ? 'target' : ''}">${fNum(res.moic, 2)}x</td>`;
+                html += `<td class="${isCenter ? 'target' : ''}">${fPct(res.yoc, 1)}</td>`;
             });
             html += '</tr>';
         });
@@ -2101,9 +2142,9 @@ function updateFromBackend() {
     model.rentPerUnit = parseFloat(document.getElementById('be-rent').value) || model.rentPerUnit;
     model.otherIncomePerUnit = parseFloat(document.getElementById('be-other').value) || model.otherIncomePerUnit;
     model.opexRatio = parseFloat(document.getElementById('be-opex').value) || model.opexRatio;
-    const __tppu = parseFloat(document.getElementById('be-target-ppu').value);
+    const __tppu = parseMoney(document.getElementById('be-target-ppu').value);
     if (isFinite(__tppu) && __tppu > 0) model.targetPPU = Math.round(__tppu);
-    model.landCost = parseFloat(document.getElementById('be-land').value) || model.landCost;
+    model.landCost = parseMoney(document.getElementById('be-land').value) || model.landCost;
     model.modCost1BR = parseFloat(document.getElementById('be-mod1').value) || model.modCost1BR;
     model.modCost2BR = parseFloat(document.getElementById('be-mod2').value) || model.modCost2BR;
     model.modCost3BR = parseFloat(document.getElementById('be-mod3').value) || model.modCost3BR;
@@ -2133,6 +2174,20 @@ function refreshMixCheck() {
     } else {
         el.innerHTML = `<span style="color:var(--warn);">${sum} of ${tgt} (diff ${sum > tgt ? '+' : ''}${sum - tgt})</span>`;
     }
+}
+
+// Parse a money string that may use k/m/b shorthand: "$15M"->15000000,
+// "750k"->750000, "15,000,000"->15000000, "1.2mm"->1200000. 0 if nothing parses.
+function parseMoney(raw) {
+    const s = (raw == null ? '' : String(raw)).trim().toLowerCase().replace(/[$,\s]/g, '');
+    const m = s.match(/^(-?\d*\.?\d+)\s*(k|thousand|m|mm|million|b|billion)?$/);
+    if (!m) { const f = parseFloat(s.replace(/[^0-9.\-]/g, '')); return isFinite(f) ? f : 0; }
+    let n = parseFloat(m[1]); if (!isFinite(n)) return 0;
+    const u = m[2] || '';
+    if (u === 'k' || u === 'thousand') n *= 1e3;
+    else if (u === 'm' || u === 'mm' || u === 'million') n *= 1e6;
+    else if (u === 'b' || u === 'billion') n *= 1e9;
+    return n;
 }
 
 const fLandDollar = v => (v || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
@@ -2181,7 +2236,7 @@ function updateLandFromSlider() {
 
 // $ field edit -> land = the exact figure typed (dynamic, linked to purchase price).
 function updateLandFromDollar() {
-    const v = parseFloat((document.getElementById('inp-land-dollar').value + '').replace(/[^0-9.]/g, '')) || 0;
+    const v = parseMoney(document.getElementById('inp-land-dollar').value);
     model.landCost = Math.round(v);
     const be = document.getElementById('be-land'); if (be) be.value = model.landCost || '';
     updateUI();
@@ -2634,7 +2689,7 @@ window.__pfDebug = function () {
 
 // Debounced recompute -> overwrite the headline return tiles with engine truth.
 function scheduleEngine() {
-    if (!__engineReady() || !model.units || !model.nrsf) return;
+    if (!__engineReady() || !model.units || !model.nrsf) { renderEngineStatus(false); return; }
     clearTimeout(__engineTimer);
     __engineTimer = setTimeout(() => {
         __engineKPIs = computeEngineReturns(model);
@@ -2643,6 +2698,13 @@ function scheduleEngine() {
         renderMaxLandDisplay();
         renderLandLever();
     }, 120);
+}
+
+function renderEngineStatus(reconciled) {
+    const el = document.getElementById('engineStatus'); if (!el) return;
+    if (!model || !model.units) { el.textContent = ''; el.className = 'engine-status'; return; }
+    if (reconciled) { el.innerHTML = '<span class="dot"></span> Live figures reconciled to the institutional workbook (match the Excel download).'; el.className = 'engine-status ok'; }
+    else { el.innerHTML = '<span class="dot"></span> Quick estimate \u2014 reconciling to the institutional workbook\u2026'; el.className = 'engine-status warn'; }
 }
 
 function applyEngineKPIs() {
@@ -2658,6 +2720,7 @@ function applyEngineKPIs() {
     if (k.noi != null)    set('noi', fMoneyMK(k.noi));
     if (k.dscr != null)   set('dscr', fNum(k.dscr, 2) + 'x');
     if (k.equity != null) set('equity', fMoneyM(k.equity));
+    renderEngineStatus(true);
 }
 
 async function downloadProforma() {
@@ -2737,6 +2800,83 @@ async function downloadProforma() {
 /* =====================================================================
    FULL PROFORMA GENERATION
    ===================================================================== */
+const MZ_SESS_KEY = 'modularz_sessions_v1';
+let __sessSaveTimer = null;
+function mzLoadSessions() { try { return JSON.parse(localStorage.getItem(MZ_SESS_KEY) || '[]'); } catch (e) { return []; } }
+function mzStoreSessions(list) { try { localStorage.setItem(MZ_SESS_KEY, JSON.stringify(list.slice(0, 30))); } catch (e) {} }
+function mzSessLabel(s) {
+    const d = new Date(s.ts);
+    const when = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    return (s.name || 'Untitled') + ' \u00b7 ' + when;
+}
+function esc(s) { return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// Debounced autosave of the working deal (id 'auto') so a reload/return is safe.
+function autoSaveSession() {
+    if (!model || !model.units) return;
+    clearTimeout(__sessSaveTimer);
+    __sessSaveTimer = setTimeout(() => {
+        const list = mzLoadSessions().filter(s => s.id !== 'auto');
+        list.unshift({ id: 'auto', name: (model.projectName || 'Working deal') + ' (autosave)', ts: Date.now(), model: JSON.parse(JSON.stringify(model)) });
+        mzStoreSessions(list);
+    }, 700);
+}
+function saveNamedSession() {
+    if (!model || !model.units) { addMsg('Load a deal before saving a session.', 'system'); return; }
+    const name = prompt('Name this underwriting:', model.projectName || 'Untitled deal');
+    if (name == null) return;
+    const list = mzLoadSessions();
+    list.unshift({ id: 'sess_' + Date.now(), name: (name.trim() || 'Untitled'), ts: Date.now(), model: JSON.parse(JSON.stringify(model)) });
+    mzStoreSessions(list);
+    renderSessionMenu();
+    addMsg('\u2713 Saved session \u201c' + esc(name.trim() || 'Untitled') + '\u201d. Reload it anytime from the Sessions menu.', 'system', true);
+}
+function restoreSession(id) {
+    const s = mzLoadSessions().find(x => x.id === id);
+    if (!s) return;
+    model = Object.assign({}, model, s.model);
+    try { const __rl = __residualLandForPPU(model.targetPPU || 350000); if (__rl != null) __maxLand = __rl; } catch (e) {}
+    snapshot = runUnderwriting(model);
+    if (model.projectName) document.getElementById('projName').innerHTML = esc(model.projectName);
+    if (model.address) document.getElementById('projSub').innerHTML = esc(model.address);
+    updateUI({ flash: true });
+    const menu = document.getElementById('sessionMenu'); if (menu) menu.classList.add('hidden');
+    addMsg('\u21a9 Restored \u201c' + esc(s.name || 'session') + '\u201d.', 'system', true);
+}
+function deleteSession(id, ev) {
+    if (ev) ev.stopPropagation();
+    mzStoreSessions(mzLoadSessions().filter(x => x.id !== id));
+    renderSessionMenu();
+}
+function renderSessionMenu() {
+    const menu = document.getElementById('sessionMenu'); if (!menu) return;
+    const list = mzLoadSessions();
+    let h = '<div class="session-menu-head"><span>Saved underwritings</span><button onclick="saveNamedSession()">+ Save current</button></div>';
+    if (!list.length) h += '<div class="session-empty">No saved sessions yet. Load a deal, then \u201cSave current.\u201d</div>';
+    else h += list.map(s => '<div class="session-row" onclick="restoreSession(\'' + s.id + '\')"><span class="session-name">' + esc(mzSessLabel(s)) + '</span><button class="session-del" title="Delete" onclick="deleteSession(\'' + s.id + '\', event)">\u00d7</button></div>').join('');
+    menu.innerHTML = h;
+}
+function toggleSessionMenu(ev) {
+    if (ev) ev.stopPropagation();
+    const menu = document.getElementById('sessionMenu'); if (!menu) return;
+    renderSessionMenu();
+    menu.classList.toggle('hidden');
+}
+document.addEventListener('click', (e) => {
+    const m = document.getElementById('sessionMenu');
+    const ctl = e.target.closest && e.target.closest('.session-ctl');
+    if (m && !ctl) m.classList.add('hidden');
+});
+// On load: if a working deal was autosaved and nothing is loaded, offer it back.
+setTimeout(() => {
+    try {
+        const auto = mzLoadSessions().find(s => s.id === 'auto');
+        if (auto && (!model || !model.units)) {
+            addMsg('You have a saved session: <b>' + esc(auto.name || 'Working deal') + '</b> (' + new Date(auto.ts).toLocaleString() + '). <a href="#" onclick="restoreSession(\'auto\'); return false;">Restore it</a> or open the Sessions menu (top right).', 'system', true);
+        }
+    } catch (e) {}
+}, 500);
+
 function generateProforma() {
     const wrap = document.getElementById('proformaWrap');
     if (!model.units) {
@@ -2744,6 +2884,24 @@ function generateProforma() {
         return;
     }
     const r = runUnderwriting(model);
+    // Reconcile the headline returns + capital stack to the institutional
+    // workbook (same engine as the .xlsx download) so this tab can't disagree
+    // with the downloaded model. Falls back to the JS projection if the engine
+    // isn't ready. The year-by-year schedule below stays an indicative JS build.
+    const __eng = (typeof computeEngineReturns === 'function') ? computeEngineReturns(model) : null;
+    if (__eng) {
+        if (__eng.irr != null)      r.irr = __eng.irr;
+        if (__eng.moic != null)     r.moic = __eng.moic;
+        if (__eng.coc != null)      r.avgCoc = __eng.coc;
+        if (__eng.yoc != null)      r.yoc = __eng.yoc;
+        if (__eng.spread != null)   r.spread = __eng.spread;
+        if (__eng.noi != null)      r.noi = __eng.noi;
+        if (__eng.tdc != null)      r.tdc = __eng.tdc;
+        if (__eng.ppu != null)      r.ppu = __eng.ppu;
+        if (__eng.permLoan != null) r.loanAmt = __eng.permLoan;
+        if (__eng.equity != null)   r.equity = __eng.equity;
+        if (__eng.dscr != null)     r.dscr = __eng.dscr;
+    }
     const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
     // 10-Year cash flow projection
@@ -2774,6 +2932,9 @@ function generateProforma() {
         <div class="proforma-doc">
             <h1>${model.projectName}</h1>
             <div class="doc-sub">${model.address} · ${model.units} units · Generated ${date}</div>
+            <div class="doc-recon ${__eng ? 'ok' : 'warn'}">${__eng
+                ? '\u2713 Returns, TDC, equity, loan &amp; NOI reconciled to the institutional workbook \u2014 these match the Excel download. The year-by-year schedule is an indicative projection.'
+                : '\u26a0 Workbook engine not loaded \u2014 figures are the quick JS estimate and may differ from the Excel download.'}</div>
 
             <h3>Returns Summary</h3>
             <div class="returns-grid">

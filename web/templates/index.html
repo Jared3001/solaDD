@@ -68,7 +68,7 @@
         <div class="field hidden" data-for="underwrite">
           <label for="dd">DD checklist</label>
           <input type="file" id="dd" name="dd" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
-          <p class="hint">Upload a completed DD checklist (.xlsx) → a <strong>Stick + Modular</strong> pro-forma model (downloaded as a .zip), macros &amp; formulas preserved. Residential stories and building NRSF default to first-pass placeholders (3 stories / 20,000 NRSF) you can override; the remaining hand fields — acquisition price, BIPOC, prevailing wage — are left blank to fill, then recalc in Excel. Or run a DD in the other tabs and click <strong>Generate financial model</strong> on the result — no re-upload.</p>
+          <p class="hint">Upload a completed DD checklist (.xlsx) → the <strong>LIHTC v28 model</strong> (default), computed and ready to open, plus the legacy <strong>Stick + Modular</strong> pro-formas — bundled as a .zip with macros &amp; formulas preserved. Residential stories defaults to 5 and NRSF flows from the model; land defaults to $150/SF (or the OM price) — all overridable on the review step. Or run a DD in the other tabs and click <strong>Generate financial model</strong> on the result — no re-upload.</p>
 
           <label for="uw-name" class="om-label">Deal name <span class="om-opt">(optional)</span></label>
           <input type="text" id="uw-name" name="name" placeholder="defaults to the site address" autocomplete="off">
@@ -137,6 +137,21 @@
         <p id="review-error" class="error-banner hidden"></p>
       </section>
 
+      <section id="scenario-panel" class="panel hidden">
+        <div class="review-head">
+          <div>
+            <h2 class="recent-head">Select scenarios to generate</h2>
+            <p class="hint" id="scn-sub"></p>
+          </div>
+          <div class="status-actions">
+            <button id="scn-cancel" class="download-btn ghost" type="button">Cancel</button>
+            <button id="scn-go" class="download-btn" type="button">Generate selected</button>
+          </div>
+        </div>
+        <div id="scn-list" class="scn-list"></div>
+        <p id="scn-error" class="error-banner hidden"></p>
+      </section>
+
       <section id="comp-panel" class="panel hidden">
         <div class="review-head">
           <div>
@@ -163,7 +178,7 @@
 
       <section id="recent-panel" class="panel hidden">
         <h2 class="recent-head">Completed checklists</h2>
-        <p class="hint">Re-download a finished checklist, or click <strong>→ Financial model</strong> to build the Stick + Modular pro-forma straight from it. Persists across redeploys.</p>
+        <p class="hint">Re-download a finished checklist, or click <strong>→ Financial model</strong> to build the LIHTC v28 model (plus legacy Stick + Modular) straight from it. Persists across redeploys.</p>
         <table class="recent-table">
           <thead><tr><th>Site</th><th>Type</th><th>Fields</th><th>When</th><th></th></tr></thead>
           <tbody id="recent-body"></tbody>

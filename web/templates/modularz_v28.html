@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ModularZ — LIHTC Model (v28)</title>
+<style>
+  :root {
+    --navy: #1B2A4A; --gold: #E0A237; --muted: #cdd6e6;
+    --bg: #f4f6fa; --panel: #ffffff; --border: #e2e7f0; --border-strong: #cbd3e1;
+    --text: #1d2433; --text-muted: #5a6679; --text-faint: #8a94a6;
+    --pos: #1f9d55; --neg: #d9534f;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); }
+
+  .site-nav { display: flex; align-items: center; gap: 24px; height: 48px; padding: 0 20px; background: var(--navy); color: #fff; border-bottom: 3px solid var(--gold); }
+  .site-nav-brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; }
+  .site-nav-brand .snb-sep { color: var(--gold); }
+  .site-nav-brand .snb-sub { color: var(--muted); font-weight: 500; }
+  .site-nav-tools { display: flex; gap: 6px; }
+  .snav-link { color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 6px; }
+  .snav-link:hover { background: rgba(255,255,255,0.08); color: #fff; }
+  .snav-link.active { background: var(--gold); color: var(--navy); }
+  .site-nav-out { margin-left: auto; color: var(--muted); text-decoration: none; font-size: 13px; }
+
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
+  .pagehead { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 6px; flex-wrap: wrap; }
+  .pagehead h1 { font-size: 20px; margin: 0; }
+  .pagehead .sub { font-size: 12px; color: var(--text-faint); }
+  .enginebar { font-size: 11.5px; color: var(--text-muted); margin: 8px 0 16px; display: flex; align-items: center; gap: 8px; }
+  .enginebar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
+  .enginebar.ok .dot { background: var(--pos); } .enginebar.busy .dot { background: var(--gold); } .enginebar.err .dot { background: var(--neg); }
+
+  .grid { display: grid; grid-template-columns: 360px 1fr; gap: 18px; align-items: start; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
+  .panel h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-faint); margin: 0 0 10px; }
+  .grp { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--gold); margin: 14px 0 6px; }
+  .grp:first-of-type { margin-top: 2px; }
+
+  .field { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; }
+  .field label { font-size: 12.5px; color: var(--text-muted); }
+  .field .hint { font-size: 10px; color: var(--text-faint); }
+  .field input, .field select { width: 150px; font-family: var(--mono); font-size: 12.5px; text-align: right; border: 1px solid var(--border-strong); border-radius: 5px; padding: 5px 8px; background: #fff; color: var(--text); }
+  .field select { text-align: left; }
+  .field input:focus, .field select:focus { outline: none; border-color: var(--gold); }
+
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  @media (max-width: 560px) { .kpis { grid-template-columns: repeat(2, 1fr); } }
+  .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .kpi.feat { background: var(--navy); border-color: var(--navy); }
+  .kpi .lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-faint); }
+  .kpi.feat .lbl { color: var(--muted); }
+  .kpi .val { font-family: var(--mono); font-size: 22px; font-weight: 700; margin-top: 4px; color: var(--text); }
+  .kpi.feat .val { color: #fff; }
+  .kpi .val.placeholder { color: var(--text-faint); font-weight: 400; }
+  .kpi.busy { opacity: 0.55; transition: opacity .15s; }
+
+  table.srctbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.srctbl td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  table.srctbl td.v { text-align: right; font-family: var(--mono); }
+  table.srctbl tr.total td { font-weight: 700; border-top: 2px solid var(--border-strong); border-bottom: none; }
+  .note { font-size: 11px; color: var(--text-faint); margin-top: 10px; line-height: 1.45; }
+  .calcbtn { font-size: 12px; font-weight: 600; color: #fff; background: var(--navy); border: none; border-radius: 6px; padding: 8px 14px; cursor: pointer; }
+  .calcbtn:hover { background: #24365c; }
+  .ombtn { font-size: 12px; font-weight: 600; color: var(--navy); background: #fff; border: 1px solid var(--gold); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+  .ombtn:hover { background: #fdf6e9; }
+  .sessmenu { position: absolute; top: calc(100% + 6px); right: 0; width: 280px; max-height: 340px; overflow-y: auto; background: #fff; border: 1px solid var(--border-strong); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.18); z-index: 50; padding: 6px; }
+  .sessmenu.hidden { display: none; }
+  .sessmenu-head { display: flex; justify-content: space-between; align-items: center; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-faint); padding: 6px 8px; }
+  .sessmenu-head button { font-size: 11px; font-weight: 600; color: var(--gold); background: none; border: none; cursor: pointer; }
+  .sessrow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 6px; cursor: pointer; }
+  .sessrow:hover { background: var(--bg); }
+  .sessrow .nm { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sessrow .del { font-size: 15px; color: var(--text-faint); background: none; border: none; cursor: pointer; padding: 0 4px; }
+  .sessrow .del:hover { color: var(--neg); }
+  .sessempty { font-size: 12px; color: var(--text-faint); padding: 8px; line-height: 1.4; }
+</style>
+</head>
+<body>
+<nav class="site-nav">
+  <div class="site-nav-brand"><span>SoLa Impact</span><span class="snb-sep">/</span><span class="snb-sub">Tools</span></div>
+  <div class="site-nav-tools">
+    <a href="/" class="snav-link">Feasibility Study</a>
+    <a href="/modularz" class="snav-link">ModularZ</a>
+    <a href="/modularz/v28" class="snav-link active">LIHTC (v28)</a>
+  </div>
+  <a class="site-nav-out" href="/logout">Sign out</a>
+</nav>
+
+<div class="wrap">
+  <div class="pagehead">
+    <div>
+      <h1 id="projTitle">New LIHTC Project</h1>
+      <div class="sub">Live underwriting on the institutional LIHTC Model v28 — computed by the workbook itself (server-side).</div>
+    </div>
+    <div style="display:flex; gap:8px; position:relative;">
+      <div style="position:relative;">
+        <button class="calcbtn" style="background:#fff; color:var(--navy); border:1px solid var(--border-strong);" onclick="toggleSessions(event)">⟲ Sessions</button>
+        <div class="sessmenu hidden" id="sessmenu"></div>
+      </div>
+      <button class="calcbtn" onclick="recalc(true)">Recalculate</button>
+      <button class="calcbtn" style="background:#1f7a44;" onclick="downloadWorkbook(this)">⬇ Download Excel</button>
+    </div>
+  </div>
+  <div class="enginebar" id="enginebar"><span class="dot"></span><span id="engineMsg">Ready.</span></div>
+
+  <div class="grid">
+    <!-- INPUTS -->
+    <div>
+      <div class="panel">
+        <h2>Inputs</h2>
+
+        <div class="grp">Project</div>
+        <div class="field" style="justify-content:flex-start; gap:8px;">
+          <button type="button" class="ombtn" onclick="document.getElementById('omfile').click()">📄 Autofill from OM</button>
+          <button type="button" class="ombtn" onclick="researchAddress()">🔎 Research address</button>
+          <input type="file" id="omfile" accept="application/pdf" style="display:none">
+          <span class="hint" id="omstatus"></span>
+        </div>
+        <div class="field"><label>Project Name</label><input type="text" data-field="project_name" placeholder="e.g. 840 G St"></div>
+        <div class="field"><label>County</label><select data-field="county" id="county"></select></div>
+
+        <div class="grp">Site &amp; Massing</div>
+        <div class="field"><label>Lot Size (SF)</label><input type="number" data-field="lot_sf" id="lot_sf" value="20000"></div>
+        <div class="field"><label>Residential Stories</label><input type="number" data-field="residential_stories" value="5"></div>
+        <div class="field"><label>Podium Levels</label><input type="number" data-field="podium_levels" value="0"></div>
+        <div class="field"><label>Construction Type</label><select data-field="construction_type"><option>Modular</option><option>Stick</option></select></div>
+
+        <div class="grp">Unit Mix <span class="hint" id="mixwarn"></span></div>
+        <div class="field"><label>Studio / 0-BR (%)</label><input type="number" step="1" data-field="unit_mix_0b" id="mix_0b" value="0"></div>
+        <div class="field"><label>1-BR (%) <span class="hint">remainder</span></label><input type="number" id="mix_1b" value="100" readonly tabindex="-1" style="background:#f4f6fa;color:var(--text-faint);"></div>
+        <div class="field"><label>2-BR (%)</label><input type="number" step="1" data-field="unit_mix_2b" id="mix_2b" value="0"></div>
+        <div class="field"><label>3-BR (%)</label><input type="number" step="1" data-field="unit_mix_3b" id="mix_3b" value="0"></div>
+
+        <div class="grp">Acquisition &amp; Financing</div>
+        <div class="field"><label>Gap Financing</label><select data-field="gap_financing" id="gap_financing"></select></div>
+        <div class="field"><label>Land Cost <span class="hint" id="landhint">$150/SF default</span></label><input type="number" data-field="land_cost" id="land_cost" value="3000000"></div>
+        <div class="field"><label>Tax-Exempt?</label><select data-field="tax_exempt"><option>Yes</option><option>No</option></select></div>
+        <div class="field"><label>Perm Interest Rate (%)</label><input type="number" step="0.05" data-field="interest_rate" value="8"></div>
+        <div class="field"><label>DSCR</label><input type="number" step="0.01" data-field="dscr" value="1"></div>
+        <div class="field"><label>Amortization (yrs)</label><input type="number" data-field="amortization" value="40"></div>
+        <div class="field"><label>Bond Test Limit (%)</label><input type="number" step="0.1" data-field="bond_test_limit" value="27.5"></div>
+
+        <div class="grp">Growth</div>
+        <div class="field"><label>Rent Growth (%)</label><input type="number" step="0.1" data-field="rent_growth" value="2.5"></div>
+        <div class="field"><label>Expense Growth (%)</label><input type="number" step="0.1" data-field="expense_growth" value="3.5"></div>
+      </div>
+      <div class="note">
+        Edits recalculate automatically (~1s) on the live v28 workbook. Land defaults to <b>$150/buildable SF</b>
+        when not set (OM price wiring pending). Unit mix &amp; gap-financing inputs are coming next.
+      </div>
+    </div>
+
+    <!-- OUTPUTS -->
+    <div>
+      <div class="panel" style="padding-bottom: 18px;">
+        <h2>Returns</h2>
+        <div class="kpis" id="kpis">
+          <div class="kpi feat"><div class="lbl">GP IRR (15-yr)</div><div class="val placeholder" data-out="GP IRR (15-yr)">—</div></div>
+          <div class="kpi feat"><div class="lbl">Total IRR</div><div class="val placeholder" data-out="Total IRR">—</div></div>
+          <div class="kpi"><div class="lbl">GP Equity Multiple</div><div class="val placeholder" data-out="GP MOIC">—</div></div>
+          <div class="kpi"><div class="lbl">Equity Required</div><div class="val placeholder" data-out="Equity Required">—</div></div>
+          <div class="kpi"><div class="lbl">GP Net Profit</div><div class="val placeholder" data-out="GP Net Profit">—</div></div>
+          <div class="kpi"><div class="lbl">Tiebreak Score</div><div class="val placeholder" data-out="Tiebreak Score">—</div></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Capital Stack</h2>
+        <table class="srctbl">
+          <tbody>
+            <tr><td>Permanent Loan</td><td class="v" data-out="Permanent Loan">—</td></tr>
+            <tr><td>Tax Credit Equity</td><td class="v" data-out="Tax Credit Equity">—</td></tr>
+            <tr><td>Equity Required (GP)</td><td class="v" data-out="Equity Required">—</td></tr>
+          </tbody>
+        </table>
+        <div class="note">Figures computed by the institutional LIHTC workbook (XLOOKUP/LET/LAMBDA) via headless LibreOffice — they match the downloaded Excel exactly.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const COUNTIES = {{ counties|tojson }};
+const GAP_OPTIONS = {{ gap_options|tojson }};
+const PCT_FIELDS = ['rent_growth', 'expense_growth', 'bond_test_limit', 'interest_rate',
+                    'unit_mix_0b', 'unit_mix_2b', 'unit_mix_3b'];
+let landTouched = false, calcSeq = 0, calcTimer = null;
+
+// Populate dropdowns
+(function () {
+  const sel = document.getElementById('county');
+  COUNTIES.forEach(c => { const o = document.createElement('option'); o.textContent = c; sel.appendChild(o); });
+  sel.value = COUNTIES.includes('Los Angeles') ? 'Los Angeles' : COUNTIES[0];
+  const gap = document.getElementById('gap_financing');
+  GAP_OPTIONS.forEach(g => { const o = document.createElement('option'); o.textContent = g; gap.appendChild(o); });
+  gap.value = 'None';  // Cazalis: gap financing defaults to None
+})();
+
+// 1-BR is the remainder of the mix; reflect it live and flag over-allocation.
+function updateMix() {
+  const a = parseFloat(document.getElementById('mix_0b').value) || 0;
+  const c = parseFloat(document.getElementById('mix_2b').value) || 0;
+  const d = parseFloat(document.getElementById('mix_3b').value) || 0;
+  const oneBr = 100 - a - c - d;
+  document.getElementById('mix_1b').value = oneBr;
+  const warn = document.getElementById('mixwarn');
+  warn.textContent = oneBr < 0 ? '⚠ exceeds 100%' : '';
+  warn.style.color = oneBr < 0 ? 'var(--neg)' : 'var(--text-faint)';
+}
+
+const fmtUSD = v => (v < 0 ? '-' : '') + '$' + Math.abs(Math.round(v)).toLocaleString('en-US');
+const fmtPct = v => (v * 100).toFixed(1) + '%';
+// IRR sanity clamp: a degenerate (e.g. over-funded / negative-equity) deal makes
+// the workbook's XIRR blow up to absurd values — show "n/m" rather than 1000%+.
+const fmtIrr = v => (Math.abs(v) > 3 ? 'n/m' : (v * 100).toFixed(1) + '%');
+const fmtMult = v => v.toFixed(2) + 'x';
+const fmtNum2 = v => v.toFixed(2);
+const OUT_FMT = {
+  'GP IRR (15-yr)': fmtIrr, 'Total IRR': fmtIrr, 'GP MOIC': fmtMult,
+  'Equity Required': fmtUSD, 'GP Net Profit': fmtUSD, 'Tiebreak Score': fmtNum2,
+  'Permanent Loan': fmtUSD, 'Tax Credit Equity': fmtUSD,
+};
+
+function setEngine(state, msg) {
+  const bar = document.getElementById('enginebar');
+  bar.className = 'enginebar ' + state;
+  document.getElementById('engineMsg').textContent = msg;
+  document.querySelectorAll('.kpi').forEach(k => k.classList.toggle('busy', state === 'busy'));
+}
+
+function gatherInputs() {
+  const inp = {};
+  document.querySelectorAll('[data-field]').forEach(el => {
+    const f = el.dataset.field;
+    let v = el.value;
+    if (el.tagName === 'SELECT' || el.type === 'text') { if (v !== '') inp[f] = v; return; }
+    v = parseFloat(String(v).replace(/[^0-9.\-]/g, ''));
+    if (!isFinite(v)) return;
+    if (PCT_FIELDS.includes(f)) v = v / 100;
+    inp[f] = v;
+  });
+  return inp;
+}
+
+function renderOutputs(out) {
+  document.querySelectorAll('[data-out]').forEach(el => {
+    const key = el.dataset.out;
+    const v = out[key];
+    if (v == null || typeof v !== 'number') { el.textContent = '—'; el.classList.add('placeholder'); return; }
+    el.textContent = (OUT_FMT[key] || (x => x))(v);
+    el.classList.remove('placeholder');
+  });
+  const nm = document.querySelector('[data-field="project_name"]').value.trim();
+  document.getElementById('projTitle').textContent = nm || 'LIHTC Project';
+}
+
+async function recalc(immediate) {
+  const inputs = gatherInputs();
+  const seq = ++calcSeq;
+  setEngine('busy', 'Recalculating on the v28 workbook…');
+  try {
+    const r = await fetch('/api/modularz/calc', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inputs }),
+    });
+    const data = await r.json();
+    if (seq !== calcSeq) return; // a newer calc superseded this one
+    if (data.ok) { renderOutputs(data.outputs); setEngine('ok', 'Reconciled to the institutional workbook (matches the Excel download).'); }
+    else { setEngine('err', 'Calc error: ' + (data.error || 'unknown')); }
+  } catch (e) {
+    if (seq === calcSeq) setEngine('err', 'Request failed: ' + e.message);
+  }
+}
+
+function scheduleCalc() { clearTimeout(calcTimer); calcTimer = setTimeout(() => recalc(false), 700); }
+
+// Land default = lot_sf * $150 until the user edits land directly.
+function applyLandDefault() {
+  if (landTouched) return;
+  const lot = parseFloat(document.getElementById('lot_sf').value) || 0;
+  document.getElementById('land_cost').value = Math.round(lot * 150);
+}
+
+document.querySelectorAll('[data-field]').forEach(el => {
+  el.addEventListener('input', () => {
+    if (el.dataset.field === 'land_cost') landTouched = true;
+    if (el.dataset.field === 'lot_sf') applyLandDefault();
+    if (el.dataset.field && el.dataset.field.startsWith('unit_mix_')) updateMix();
+    scheduleCalc();
+  });
+  el.addEventListener('change', scheduleCalc);
+});
+
+// OM autofill: upload a PDF, extract deal facts, populate inputs, recalc.
+function setField(name, value) {
+  const el = document.querySelector('[data-field="' + name + '"]');
+  if (!el || value == null) return;
+  el.value = value;
+  if (name === 'land_cost') landTouched = true; // OM price overrides the $150/SF default
+}
+document.getElementById('omfile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const status = document.getElementById('omstatus');
+  status.textContent = 'Reading OM…'; status.style.color = 'var(--text-muted)';
+  const fd = new FormData(); fd.append('om', file);
+  try {
+    const r = await fetch('/api/modularz/extract-om', { method: 'POST', body: fd });
+    const data = await r.json();
+    if (!data.ok) { status.textContent = '⚠ ' + (data.error || 'extraction failed'); status.style.color = 'var(--neg)'; return; }
+    const got = data.inputs || {};
+    Object.keys(got).forEach(k => setField(k, got[k]));
+    if (got.lot_sf && !('land_cost' in got)) applyLandDefault(); // no OM price → $150/SF
+    const filled = Object.keys(got);
+    status.textContent = filled.length ? '✓ Filled: ' + filled.join(', ') : 'No mappable fields found';
+    status.style.color = filled.length ? 'var(--pos)' : 'var(--text-faint)';
+    recalc(true);
+  } catch (err) {
+    status.textContent = '⚠ ' + err.message; status.style.color = 'var(--neg)';
+  } finally {
+    e.target.value = ''; // allow re-uploading the same file
+  }
+});
+
+// Download the underwritten .xlsm (inputs patched, recalcs on open in Excel).
+async function downloadWorkbook(btn) {
+  const label = btn.textContent; btn.textContent = 'Building…'; btn.disabled = true;
+  try {
+    const r = await fetch('/api/modularz/download', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inputs: gatherInputs() }),
+    });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || ('HTTP ' + r.status)); }
+    const blob = await r.blob();
+    const cd = r.headers.get('Content-Disposition') || '';
+    const fn = (cd.match(/filename="([^"]+)"/) || [, 'LIHTC_underwritten_v28.xlsm'])[1];
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = fn; document.body.appendChild(a); a.click();
+    a.remove(); URL.revokeObjectURL(url);
+    setEngine('ok', 'Workbook downloaded — opens in Excel and recalculates with your inputs.');
+  } catch (e) {
+    setEngine('err', 'Download failed: ' + e.message);
+  } finally {
+    btn.textContent = label; btn.disabled = false;
+  }
+}
+
+// ---------- AI ADDRESS RESEARCH ----------
+async function researchAddress() {
+  const pn = document.querySelector('[data-field="project_name"]');
+  let addr = pn.value.trim();
+  if (!addr) { addr = (prompt('Address to research:') || '').trim(); if (!addr) return; }
+  const status = document.getElementById('omstatus');
+  status.textContent = 'Researching…'; status.style.color = 'var(--text-muted)';
+  try {
+    const r = await fetch('/api/modularz/research', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ address: addr }),
+    });
+    const data = await r.json();
+    if (!data.ok) { status.textContent = '⚠ ' + (data.error || 'research failed'); status.style.color = 'var(--neg)'; return; }
+    const got = data.inputs || {};
+    Object.keys(got).forEach(k => setField(k, got[k]));
+    let msg = 'Found' + (got.county ? ' ' + got.county + ' County' : '');
+    // Apply the land $/SF estimate (clearly flagged) if land hasn't been set manually.
+    if (data.land_psf && !landTouched) {
+      const lot = parseFloat(document.getElementById('lot_sf').value) || 0;
+      if (lot > 0) { document.getElementById('land_cost').value = Math.round(lot * data.land_psf); landTouched = true; msg += ` · land ~$${data.land_psf}/SF (AI est., editable)`; }
+    }
+    status.textContent = '✓ ' + msg; status.style.color = 'var(--pos)';
+    recalc(true);
+  } catch (e) { status.textContent = '⚠ ' + e.message; status.style.color = 'var(--neg)'; }
+}
+
+// ---------- SESSION SAVE / RESTORE (localStorage) ----------
+const V28_SESS_KEY = 'modularz_v28_sessions';
+let sessSaveTimer = null;
+const escHtml = s => (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function gatherRaw() {  // raw field values (for faithful restore)
+  const o = {};
+  document.querySelectorAll('[data-field]').forEach(el => { o[el.dataset.field] = el.value; });
+  return o;
+}
+function applyRaw(o) {
+  Object.keys(o || {}).forEach(k => { const el = document.querySelector('[data-field="' + k + '"]'); if (el) el.value = o[k]; });
+  updateMix();
+  recalc(true);
+}
+function loadSessions() { try { return JSON.parse(localStorage.getItem(V28_SESS_KEY) || '[]'); } catch (e) { return []; } }
+function storeSessions(list) { try { localStorage.setItem(V28_SESS_KEY, JSON.stringify(list.slice(0, 30))); } catch (e) {} }
+function autoSave() {
+  clearTimeout(sessSaveTimer);
+  sessSaveTimer = setTimeout(() => {
+    const list = loadSessions().filter(s => s.id !== 'auto');
+    const nm = document.querySelector('[data-field="project_name"]').value.trim() || 'Working deal';
+    list.unshift({ id: 'auto', name: nm + ' (autosave)', ts: Date.now(), raw: gatherRaw() });
+    storeSessions(list);
+  }, 800);
+}
+function saveNamed() {
+  const nm = prompt('Name this underwriting:', document.querySelector('[data-field="project_name"]').value.trim() || 'Untitled');
+  if (nm == null) return;
+  const list = loadSessions();
+  list.unshift({ id: 's' + Date.now(), name: nm.trim() || 'Untitled', ts: Date.now(), raw: gatherRaw() });
+  storeSessions(list); renderSessions();
+}
+function restoreSess(id) {
+  const s = loadSessions().find(x => x.id === id);
+  if (!s) return;
+  landTouched = true; // keep restored land as-is
+  applyRaw(s.raw);
+  document.getElementById('sessmenu').classList.add('hidden');
+}
+function delSess(id, ev) { ev.stopPropagation(); storeSessions(loadSessions().filter(x => x.id !== id)); renderSessions(); }
+function renderSessions() {
+  const m = document.getElementById('sessmenu');
+  const list = loadSessions();
+  let h = '<div class="sessmenu-head"><span>Saved underwritings</span><button onclick="saveNamed()">+ Save current</button></div>';
+  if (!list.length) h += '<div class="sessempty">No saved sessions yet. Click “Save current.”</div>';
+  else h += list.map(s => {
+    const d = new Date(s.ts), when = d.toLocaleDateString('en-US', {month:'short', day:'numeric'}) + ' ' + d.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
+    return '<div class="sessrow" onclick="restoreSess(\'' + s.id + '\')"><span class="nm">' + escHtml(s.name + ' · ' + when) + '</span><button class="del" onclick="delSess(\'' + s.id + '\', event)">×</button></div>';
+  }).join('');
+  m.innerHTML = h;
+}
+function toggleSessions(ev) { ev.stopPropagation(); renderSessions(); document.getElementById('sessmenu').classList.toggle('hidden'); }
+document.addEventListener('click', e => { const m = document.getElementById('sessmenu'); if (m && !e.target.closest('.sessmenu') && !e.target.closest('button')) m.classList.add('hidden'); });
+document.querySelectorAll('[data-field]').forEach(el => el.addEventListener('input', autoSave));
+
+// First load
+updateMix();
+recalc(true);
+</script>
+</body>
+</html>
