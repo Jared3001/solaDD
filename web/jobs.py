@@ -588,25 +588,61 @@ def run_lihtc_scenarios(job):
     job["completed"] = 0
 
     import modularz_calc as _mz
-    import zipfile
-    zip_path = RUN_DIR / f"{job['id']}.zip"
-    scn_files = []
-    for scn in selected:
-        job["phase"] = f"Building {scn['name']}…"
-        blob = _mz.build_for_scenario(dd, scn, deal_name=deal)
-        scn_files.append((f"{deal} — {scn['name']}.xlsm", blob))
-        job["completed"] += 1
 
-    # Try to generate a branded PDF one-pager alongside the models.
+    def _build(scn):
+        return (f"{deal} — {scn['name']}.xlsm", _mz.build_for_scenario(dd, scn, deal_name=deal))
+
+    def _calc(scn):
+        try:
+            num, txt = _mz._scenario_inputs(dd, scn, deal_name=deal)
+            vals = _mz.recalc_isolated(num, txt, read=_mz.SCENARIO_READ)
+        except Exception:
+            vals = {}
+        tdc   = vals.get("D55")
+        units = vals.get("C14")
+        return {
+            "name":    scn["name"],
+            "constr":  scn["constr"],
+            "stories": scn["stories"],
+            "lf":      scn.get("lf", "No"),
+            "results": {
+                "units":     int(round(units)) if units else None,
+                "nrsf":      vals.get("C17"),
+                "tdc":       tdc,
+                "tdc_unit":  round(tdc / units) if (tdc and units) else None,
+                "irr":       vals.get("C25"),
+                "moic":      vals.get("C26"),
+                "perm_loan": vals.get("D75"),
+                "tc_equity": vals.get("D80"),
+            },
+        }
+
+    # Fan out Excel builds (fast XML ops) and LibreOffice recalcs (capped at 2
+    # concurrent by _RECALC_SEM inside recalc_isolated) at the same time.
+    job["phase"] = "Building scenario models and computing outputs…"
+    with ThreadPoolExecutor(max_workers=len(selected) + 2) as ex:
+        build_futs = [ex.submit(_build, scn) for scn in selected]
+        calc_futs  = [ex.submit(_calc,  scn) for scn in selected]
+
+        scn_files = []
+        for fut in as_completed(build_futs):
+            scn_files.append(fut.result())
+            job["completed"] += 1
+            job["phase"] = f"Built {job['completed']}/{len(selected)} models…"
+
+        job["phase"] = "Waiting for output computations…"
+        # Collect in submission order (preserves scenario selection order in the PDF).
+        scn_data = [fut.result() for fut in calc_futs]
+
     pdf_blob = None
     try:
         import deal_onepager as _op
-        pdf_deal = _op.preliminary_deal(
+        pdf_deal = _op.deal_from_scenarios(
             name=deal,
             address=dd.get("address") or "",
             dd=dd,
             overrides=inp.get("overrides") or {},
-            scenarios=[s["name"] for s in selected],
+            scenarios_with_data=scn_data,
             as_of=datetime.datetime.now(datetime.timezone.utc).date(),
         )
         pdf_tmp = RUN_DIR / f"{job['id']}_onepager.pdf"
@@ -616,6 +652,8 @@ def run_lihtc_scenarios(job):
     except Exception:
         pass  # PDF is a nice-to-have; don't fail the job
 
+    import zipfile
+    zip_path = RUN_DIR / f"{job['id']}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for arc, blob in scn_files:
             z.writestr(arc, blob)

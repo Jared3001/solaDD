@@ -39,6 +39,8 @@ import subprocess
 import tempfile
 import zipfile
 
+import threading
+
 import openpyxl
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -48,7 +50,8 @@ MODEL_PATH = os.path.join(HERE, "models", "LIHTC_Model_v30.xlsm")
 # dynamically (below) so a re-ordered workbook still works.
 PRO_FORMA = "Pro_Forma"
 
-_PROFILE_DIR = None  # cached LibreOffice user-profile path
+_PROFILE_DIR = None  # cached LibreOffice user-profile path (for the single recalc() path)
+_RECALC_SEM  = threading.Semaphore(2)  # max concurrent LibreOffice processes (memory cap)
 
 
 # --------------------------------------------------------------------------
@@ -71,11 +74,9 @@ def _soffice_bin():
     )
 
 
-def _profile_uri():
-    """A throwaway user profile that forces full recalculation on file load."""
-    global _PROFILE_DIR
-    if _PROFILE_DIR and os.path.isdir(_PROFILE_DIR):
-        return "file://" + _PROFILE_DIR
+def _make_profile():
+    """Create a throwaway LibreOffice user profile that forces full recalc.
+    Returns the directory path. Caller is responsible for cleanup."""
     d = tempfile.mkdtemp(prefix="modularz_loprofile_")
     user = os.path.join(d, "user")
     os.makedirs(user, exist_ok=True)
@@ -91,8 +92,16 @@ def _profile_uri():
             '<prop oor:name="ODFRecalcMode" oor:op="fuse"><value>0</value></prop></item>\n'
             "</oor:items>\n"
         )
-    _PROFILE_DIR = d
-    return "file://" + d
+    return d
+
+
+def _profile_uri():
+    """Shared LibreOffice user profile for the single-threaded recalc() path."""
+    global _PROFILE_DIR
+    if _PROFILE_DIR and os.path.isdir(_PROFILE_DIR):
+        return "file://" + _PROFILE_DIR
+    _PROFILE_DIR = _make_profile()
+    return "file://" + _PROFILE_DIR
 
 
 # --------------------------------------------------------------------------
@@ -176,6 +185,9 @@ HEADLINE = {
     "Permanent Loan": "D75",
 }
 
+# Cells read per scenario for the PDF comparison table (HEADLINE + unit count + NRSF).
+SCENARIO_READ = list(HEADLINE.values()) + ["C14", "C17"]
+
 
 # Friendly input name -> (Pro_Forma cell, is_text). The true editable inputs
 # (constants), distinct from the Cell Mapping's display cells which are derived.
@@ -203,6 +215,52 @@ INPUT_CELLS = {
 
 # Options for the gap-financing dropdown (from the workbook's data validation on D59).
 GAP_FINANCING_OPTIONS = ["None", "Ground Lessor", "Soft Debt", "State Credits", "B-Bond"]
+
+
+def _scenario_inputs(dd, scenario, deal_name=None):
+    """Return (inputs_num, inputs_txt) for one scenario.
+
+    Shared between build_for_scenario (Excel download) and recalc_isolated
+    (PDF output computation) so both always use identical inputs."""
+    import uw_logic
+    base, _meta = uw_logic.base_cells(dd)
+    cells = dict(base)
+    try:
+        cells.update(uw_logic.method_cells(scenario["constr"]))
+    except Exception:  # noqa: BLE001
+        pass
+
+    derived = _v28_formula_cells()
+    num, txt = {}, {}
+    for key, val in cells.items():
+        sheet, ref = key if isinstance(key, tuple) else (PRO_FORMA, key)
+        if sheet != PRO_FORMA or val is None or ref in derived:
+            continue
+        (txt if isinstance(val, str) else num)[ref] = val
+
+    if "S16" not in num:
+        lot = _parse_num(dd.get("land_sf"))
+        if lot:
+            num["S16"] = round(lot * 150)
+
+    # Scenario overrides bypass the formula filter (intentional).
+    num.update({
+        "C15": int(scenario["stories"]),
+        "C18": int(scenario["podium"]),
+        "I3":  0.0,
+        "I5":  float(scenario["sh2B"]),
+        "I6":  float(scenario["sh3B"]),
+    })
+    sf_key = scenario["constr"]
+    if sf_key == "Stick" and scenario.get("lf") == "Yes":
+        sf_key = "Stick_LF"
+    num.update(SCENARIO_SF.get(sf_key, {}))
+    txt["C11"] = scenario["lf"]
+
+    if deal_name:
+        txt["B2"] = str(deal_name)
+
+    return num, txt
 
 
 def _parse_num(s):
@@ -357,6 +415,57 @@ def recalc(inputs_num=None, inputs_txt=None, read=None, timeout=120):
         shutil.rmtree(work, ignore_errors=True)
 
 
+def recalc_isolated(inputs_num=None, inputs_txt=None, read=None, timeout=120):
+    """Like recalc() but creates its own throwaway LibreOffice profile per call,
+    making it safe to call from multiple threads simultaneously.
+    Concurrency is capped at 2 via _RECALC_SEM to avoid OOM on Railway."""
+    inputs_num = inputs_num or {}
+    inputs_txt = inputs_txt or {}
+    read = list(read) if read else list(HEADLINE.values())
+
+    with _RECALC_SEM:
+        profile_dir = _make_profile()
+        work = tempfile.mkdtemp(prefix="modularz_calc_")
+        try:
+            clean = os.path.join(work, "model.xlsm")
+            with zipfile.ZipFile(MODEL_PATH, "r") as zin:
+                pf_target = _sheet_target(zin, PRO_FORMA)
+                wbxml = _DEFNAME_ARTIFACT.sub("", zin.read("xl/workbook.xml").decode("utf-8"))
+                pfxml = zin.read(pf_target).decode("utf-8")
+                for a, v in inputs_num.items():
+                    pfxml = _set_cell_xml(pfxml, a, v, False)
+                for a, v in inputs_txt.items():
+                    pfxml = _set_cell_xml(pfxml, a, v, True)
+                with zipfile.ZipFile(clean, "w", zipfile.ZIP_DEFLATED) as zout:
+                    for it in zin.infolist():
+                        data = zin.read(it.filename)
+                        if it.filename == "xl/workbook.xml":
+                            data = wbxml.encode("utf-8")
+                        elif it.filename == pf_target:
+                            data = pfxml.encode("utf-8")
+                        zout.writestr(it, data)
+
+            outdir = os.path.join(work, "out")
+            os.makedirs(outdir, exist_ok=True)
+            proc = subprocess.run(
+                [_soffice_bin(), "--headless", "--nologo", "--nofirststartwizard",
+                 f"-env:UserInstallation=file://{profile_dir}",
+                 "--convert-to", "xlsx", "--outdir", outdir, clean],
+                capture_output=True, timeout=timeout,
+            )
+            out_xlsx = os.path.join(outdir, "model.xlsx")
+            if not os.path.exists(out_xlsx):
+                raise RuntimeError(
+                    "LibreOffice recalc produced no output. stderr=%r"
+                    % proc.stderr.decode("utf-8", "replace")[:500]
+                )
+            ws = openpyxl.load_workbook(out_xlsx, data_only=True)[PRO_FORMA]
+            return {c: ws[c].value for c in read}
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+            shutil.rmtree(profile_dir, ignore_errors=True)
+
+
 def _force_full_recalc(wbxml):
     """Set fullCalcOnLoad=1 so Excel recalculates the patched workbook on open."""
     m = re.search(r"<calcPr[^>]*?/?>", wbxml)
@@ -504,51 +613,8 @@ def build_for_scenario(dd, scenario, deal_name=None):
         "sh2B":    float,   # share of units that are 2B (0–1)
         "sh3B":    float,   # share of units that are 3B (0–1)
     }
-
-    SF per unit type is keyed to construction method via SCENARIO_SF.
-    Bedroom-mix cells (I3/I5/I6) and the large-family toggle (C11) are
-    written directly, bypassing the formula filter — these are intentional
-    overrides of formula-driven cells in v28.
     """
-    import uw_logic
-    base, _meta = uw_logic.base_cells(dd)
-    cells = dict(base)
-    try:
-        cells.update(uw_logic.method_cells(scenario["constr"]))
-    except Exception:  # noqa: BLE001
-        pass
-
-    derived = _v28_formula_cells()
-    num, txt = {}, {}
-    # Base + method cells (respect formula filter, same as build_from_dd)
-    for key, val in cells.items():
-        sheet, ref = key if isinstance(key, tuple) else (PRO_FORMA, key)
-        if sheet != PRO_FORMA or val is None or ref in derived:
-            continue
-        (txt if isinstance(val, str) else num)[ref] = val
-
-    if "S16" not in num:
-        lot = _parse_num(dd.get("land_sf"))
-        if lot:
-            num["S16"] = round(lot * 150)
-
-    # Scenario-specific overrides — bypass formula filter (intentional)
-    num.update({
-        "C15": int(scenario["stories"]),
-        "C18": int(scenario["podium"]),
-        "I3":  0.0,
-        "I5":  float(scenario["sh2B"]),
-        "I6":  float(scenario["sh3B"]),
-    })
-    sf_key = scenario["constr"]
-    if sf_key == "Stick" and scenario.get("lf") == "Yes":
-        sf_key = "Stick_LF"
-    num.update(SCENARIO_SF.get(sf_key, {}))
-    txt.update({"C11": scenario["lf"]})
-
-    if deal_name:
-        txt["B2"] = str(deal_name)
-
+    num, txt = _scenario_inputs(dd, scenario, deal_name)
     return build_download(num, txt, tolerant=True)
 
 

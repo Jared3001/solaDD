@@ -453,9 +453,16 @@ def _page1(c, deal):
 # ─────────────────────────────────────────────────────────────────────────────────
 
 def _page2(c, deal):
-    has_budget = bool((deal.get("budget") or {}).get("sources"))
-    has_uses   = bool((deal.get("budget") or {}).get("uses"))
-    _header_small(c, deal, "Development Budget" if has_budget else "Model Scenarios")
+    has_budget         = bool((deal.get("budget") or {}).get("sources"))
+    has_uses           = bool((deal.get("budget") or {}).get("uses"))
+    has_scn_results    = bool(deal.get("_scenario_results"))
+    if has_budget:
+        subtitle = "Development Budget"
+    elif has_scn_results:
+        subtitle = "Scenario Comparison"
+    else:
+        subtitle = "Model Scenarios"
+    _header_small(c, deal, subtitle)
     _footer(c, 2, as_of=deal["as_of"])
 
     y = H - 65
@@ -507,31 +514,76 @@ def _page2(c, deal):
         y -= 16
 
     if not has_budget:
-        # ── Scenario summary (when no budget data yet — preliminary mode) ───────────
-        _section_label(c, LX, y, "Scenarios Generated")
-        y -= 14
-        for scn_name in (deal.get("_scenarios") or ["(none selected)"]):
-            c.setFont("Serif", 8.5)
-            c.setFillColor(INK)
-            c.drawString(LX + 8, y, f"• {scn_name}")
-            y -= 12
+        if has_scn_results:
+            # ── Scenario comparison table ────────────────────────────────────────────
+            _section_label(c, LX, y, "Scenario Comparison")
+            y -= 13
 
-        y -= 6
-        _rule(c, y)
-        y -= 14
+            SCN_COLS   = ["Scenario", "Type", "Str", "Units",
+                          "TDC ($M)", "TDC/Unit", "GP IRR", "MOIC", "Perm ($M)"]
+            SCN_WIDTHS = [140, 52, 34, 42, 54, 64, 54, 44, 56]  # 540 total
 
-        # Model input summary
-        _section_label(c, LX, y, "Model Inputs Used")
-        y -= 14
-        for key, val in (deal.get("_model_inputs") or {}).items():
-            _kv(c, LX, y, key, str(val) if val is not None else "—", key_w=140)
-            y -= 12
+            y = _table_header_row(c, y, SCN_COLS, SCN_WIDTHS)
 
-        y -= 6
-        _rule(c, y)
-        y -= 16
+            for i, scn in enumerate(deal["_scenario_results"]):
+                r = scn.get("results") or {}
+                units_str = f"{r['units']:,}" if r.get("units") else "—"
+                vals = [
+                    scn["name"],
+                    scn.get("constr", "—"),
+                    str(scn.get("stories", "—")),
+                    units_str,
+                    _money(r.get("tdc")),
+                    _money(r.get("tdc_unit"), "K", 0),
+                    _pct(r.get("irr")),
+                    _mult(r.get("moic"), 1),
+                    _money(r.get("perm_loan")),
+                ]
+                y = _table_data_row(c, y, vals, SCN_WIDTHS, row_idx=i)
 
-    # ── Two cards: TDC Trending + Change Orders ───────────────────────────────────
+            y -= 8
+            c.setFont("Serif", 6.5)
+            c.setFillColor(GRAY)
+            c.drawString(LX, y, "GP IRR and MOIC reflect General Partner returns on a 15-year hold.  "
+                         "TDC = Total Uses.  Perm = Permanent Loan.")
+            y -= 16
+            _rule(c, y)
+            y -= 14
+
+            # Model input summary below the table
+            _section_label(c, LX, y, "Model Inputs Used")
+            y -= 14
+            for key, val in (deal.get("_model_inputs") or {}).items():
+                _kv(c, LX, y, key, str(val) if val is not None else "—", key_w=140)
+                y -= 12
+
+        else:
+            # ── Preliminary placeholder (no computed outputs yet) ────────────────────
+            _section_label(c, LX, y, "Scenarios Generated")
+            y -= 14
+            for scn_name in (deal.get("_scenarios") or ["(none selected)"]):
+                c.setFont("Serif", 8.5)
+                c.setFillColor(INK)
+                c.drawString(LX + 8, y, f"• {scn_name}")
+                y -= 12
+
+            y -= 6
+            _rule(c, y)
+            y -= 14
+
+            _section_label(c, LX, y, "Model Inputs Used")
+            y -= 14
+            for key, val in (deal.get("_model_inputs") or {}).items():
+                _kv(c, LX, y, key, str(val) if val is not None else "—", key_w=140)
+                y -= 12
+
+            y -= 6
+            _rule(c, y)
+            y -= 16
+
+    # ── Two cards: TDC Trending + Change Orders (completed deals only) ────────────
+    if not has_budget:
+        return
     half_w = (CW - 14) / 2
     td = deal.get("tdc_trending") or {}
     co = deal.get("change_orders") or {}
@@ -964,6 +1016,21 @@ def preliminary_deal(name, address, dd=None, overrides=None, scenarios=None, as_
             "Residential Stories":  stories,
         },
     }
+
+
+def deal_from_scenarios(name, address, dd, overrides, scenarios_with_data, as_of=None):
+    """Build a deal dict for the scenario comparison PDF.
+
+    scenarios_with_data: list of {
+        name: str, constr: str, stories: int, lf: str,
+        results: {units, nrsf, tdc, tdc_unit, irr, moic, perm_loan, tc_equity}
+    }
+    """
+    base = preliminary_deal(name, address, dd, overrides,
+                            scenarios=[s["name"] for s in scenarios_with_data], as_of=as_of)
+    base["subtitle"] = "Scenario Comparison"
+    base["_scenario_results"] = scenarios_with_data
+    return base
 
 
 if __name__ == "__main__":
