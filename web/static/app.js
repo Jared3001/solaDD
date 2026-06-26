@@ -8,6 +8,7 @@ let mode = "single";
 let pollTimer = null;
 let lastDDJob = null;       // most recent completed DD run, for "Generate financial model"
 let lastDDAddress = "";     // matched address from the most recent completed DD run
+let lastScnJob = null;      // most recent completed scenario job, for "Generate PDF summary"
 
 const $ = sel => document.querySelector(sel);
 
@@ -100,6 +101,26 @@ $("#gen-model").addEventListener("click", () => {
 $("#gen-comps").addEventListener("click", () => {
   if (!lastDDJob) return;
   genCompsFrom(lastDDJob, lastDDAddress);
+});
+
+// "Generate PDF summary" from the just-completed scenario job.
+$("#gen-pdf").addEventListener("click", async () => {
+  if (!lastScnJob) return;
+  setRunning(true);
+  resetStatus();
+  try {
+    const res = await fetch("/api/run", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({mode: "pdf_summary", from_job: lastScnJob}),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Request failed.");
+    poll(data.job_id);
+  } catch (err) {
+    setRunning(false);
+    showError(err.message);
+  }
 });
 
 // "→ Financial model" / "→ Rent comps" next to any previously completed checklist in Recent runs.
@@ -611,7 +632,10 @@ function render(job) {
   if (job.downloadable) {
     const dl = $("#download");
     dl.href = `/api/download/${job.id}`;
-    dl.textContent = job.underwrite ? "Download models (.zip)" : "Download .xlsx";
+    dl.textContent = job.kind === "pdf_summary"    ? "Download PDF"
+                   : job.kind === "lihtc_scenarios" ? "Download models (.zip)"
+                   : job.underwrite                  ? "Download models (.zip)"
+                   : "Download .xlsx";
     dl.classList.remove("hidden");
   }
 
@@ -622,6 +646,12 @@ function render(job) {
     lastDDAddress = job.geo ? job.geo.matched_address : "";
     $("#gen-model").classList.remove("hidden");
     $("#gen-comps").classList.remove("hidden");
+  }
+
+  // Offer "Generate PDF summary" once a scenario job is downloadable.
+  if (job.kind === "lihtc_scenarios" && job.downloadable) {
+    lastScnJob = job.id;
+    $("#gen-pdf").classList.remove("hidden");
   }
 
   if (job.parcels) renderParcels(job);
@@ -748,6 +778,7 @@ function resetStatus() {
   $("#comp-panel").classList.add("hidden");
   $("#gen-model").classList.add("hidden");
   $("#gen-comps").classList.add("hidden");
+  $("#gen-pdf").classList.add("hidden");
   $("#download").classList.add("hidden");
   $("#matched").textContent = "";
   $("#progress-bar").style.width = "0%";

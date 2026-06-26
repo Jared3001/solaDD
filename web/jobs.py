@@ -592,6 +592,77 @@ def run_lihtc_scenarios(job):
     def _build(scn):
         return (f"{deal} — {scn['name']}.xlsm", _mz.build_for_scenario(dd, scn, deal_name=deal))
 
+    job["phase"] = "Building scenario models…"
+    with ThreadPoolExecutor(max_workers=len(selected)) as ex:
+        build_futs = [ex.submit(_build, scn) for scn in selected]
+        scn_files = []
+        for fut in as_completed(build_futs):
+            scn_files.append(fut.result())
+            job["completed"] += 1
+            job["phase"] = f"Built {job['completed']}/{len(selected)} models…"
+
+    import zipfile
+    zip_path = RUN_DIR / f"{job['id']}.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for arc, blob in scn_files:
+            z.writestr(arc, blob)
+
+    job["file"] = str(zip_path)
+    job["filename"] = f"{_safe_name(deal)}_scenarios.zip"
+    job["total"] = job["completed"] = len(scn_files)
+    job["phase"] = "Complete"
+
+
+# --------------------------------------------------------------------------- #
+# pdf_summary — generates the one-pager PDF from a completed lihtc_scenarios job
+# --------------------------------------------------------------------------- #
+def run_pdf_summary(job):
+    inp = job["input"]
+    from_jid = inp.get("from_job")
+    if not from_jid:
+        raise RuntimeError("No source scenario job provided.")
+
+    prior = get_job(from_jid)
+    if not prior:
+        raise RuntimeError("Source scenario job not found.")
+
+    # Recover the DD path and inputs from the prior scenario job.
+    prior_inp = prior.get("input") or {}
+    if prior_inp.get("dd_bytes"):
+        dd_path = RUN_DIR / f"{from_jid}_dd.xlsx"
+        if not dd_path.exists():
+            dd_path.write_bytes(prior_inp["dd_bytes"])
+    elif prior_inp.get("from_job"):
+        grandparent = get_job(prior_inp["from_job"])
+        if not grandparent or not grandparent.get("file"):
+            raise RuntimeError("Original DD checklist not found — re-run the DD.")
+        dd_path = Path(grandparent["file"])
+    else:
+        raise RuntimeError("Cannot locate the original DD checklist.")
+
+    job["phase"] = "Reading the DD checklist…"
+    dd = _underwrite.read_dd(dd_path)
+
+    import uw_logic as _uwl
+    overrides = prior_inp.get("overrides") or {}
+    deal_override = None
+    if overrides:
+        dd, deal_override = _uwl.apply_overrides(dd, overrides)
+
+    _base, _meta = _uwl.base_cells(dd)
+    deal = deal_override or prior_inp.get("name") or _base.get(("Pro_Forma", "B2")) or "Untitled Deal"
+    job["label"] = f"{deal} — PDF summary"
+
+    selected = prior_inp.get("scenarios") or []
+    if not selected:
+        raise RuntimeError("No scenarios found on the source job.")
+
+    import modularz_calc as _mz
+
+    job["total"] = len(selected)
+    job["completed"] = 0
+    job["phase"] = f"Computing outputs for {len(selected)} scenarios…"
+
     def _calc(scn):
         try:
             num, txt = _mz._scenario_inputs(dd, scn, deal_name=deal)
@@ -617,53 +688,42 @@ def run_lihtc_scenarios(job):
             },
         }
 
-    # Fan out Excel builds (fast XML ops) and LibreOffice recalcs (capped at 2
-    # concurrent by _RECALC_SEM inside recalc_isolated) at the same time.
-    job["phase"] = "Building scenario models and computing outputs…"
-    with ThreadPoolExecutor(max_workers=len(selected) + 2) as ex:
-        build_futs = [ex.submit(_build, scn) for scn in selected]
-        calc_futs  = [ex.submit(_calc,  scn) for scn in selected]
-
-        scn_files = []
-        for fut in as_completed(build_futs):
-            scn_files.append(fut.result())
+    with ThreadPoolExecutor(max_workers=min(len(selected), 4)) as ex:
+        calc_futs = [ex.submit(_calc, scn) for scn in selected]
+        scn_data  = []
+        for fut in as_completed(calc_futs):
+            scn_data.append(fut.result())
             job["completed"] += 1
-            job["phase"] = f"Built {job['completed']}/{len(selected)} models…"
+            job["phase"] = f"Computed {job['completed']}/{len(selected)} scenarios…"
 
-        job["phase"] = "Waiting for output computations…"
-        # Collect in submission order (preserves scenario selection order in the PDF).
-        scn_data = [fut.result() for fut in calc_futs]
+    # Preserve the original selection order for the PDF table.
+    order = {scn["name"]: i for i, scn in enumerate(selected)}
+    scn_data.sort(key=lambda s: order.get(s["name"], 999))
 
-    pdf_blob = None
+    job["phase"] = "Generating PDF…"
+    import sys, importlib
+    sys.path.insert(0, str(Path(__file__).parent.parent / "build" / "sources"))
     try:
         import deal_onepager as _op
-        pdf_deal = _op.deal_from_scenarios(
-            name=deal,
-            address=dd.get("address") or "",
-            dd=dd,
-            overrides=inp.get("overrides") or {},
-            scenarios_with_data=scn_data,
-            as_of=datetime.datetime.now(datetime.timezone.utc).date(),
-        )
-        pdf_tmp = RUN_DIR / f"{job['id']}_onepager.pdf"
-        _op.generate(pdf_deal, str(pdf_tmp))
-        pdf_blob = pdf_tmp.read_bytes()
-        pdf_tmp.unlink(missing_ok=True)
-    except Exception:
-        pass  # PDF is a nice-to-have; don't fail the job
+        importlib.reload(_op)
+    except ImportError:
+        import deal_onepager as _op
 
-    import zipfile
-    zip_path = RUN_DIR / f"{job['id']}.zip"
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-        for arc, blob in scn_files:
-            z.writestr(arc, blob)
-        if pdf_blob:
-            z.writestr(f"{_safe_name(deal)} — One Pager.pdf", pdf_blob)
+    pdf_deal = _op.deal_from_scenarios(
+        name=deal,
+        address=dd.get("address") or "",
+        dd=dd,
+        overrides=overrides,
+        scenarios_with_data=scn_data,
+        as_of=datetime.datetime.now(datetime.timezone.utc).date(),
+    )
+    pdf_path = RUN_DIR / f"{job['id']}_onepager.pdf"
+    _op.generate(pdf_deal, str(pdf_path))
 
-    job["file"] = str(zip_path)
-    job["filename"] = f"{_safe_name(deal)}_scenarios.zip"
-    job["total"] = job["completed"] = len(scn_files)
-    job["phase"] = "Complete"
+    job["file"]     = str(pdf_path)
+    job["filename"] = f"{_safe_name(deal)}_one_pager.pdf"
+    job["total"]    = job["completed"] = len(selected)
+    job["phase"]    = "Complete"
 
 
 # --------------------------------------------------------------------------- #
@@ -1021,7 +1081,7 @@ def create_job(kind, payload, actor=None):
 
 
 _RUNNERS = {"single": run_single, "assemblage": run_assemblage, "underwrite": run_underwrite,
-            "lihtc_scenarios": run_lihtc_scenarios,
+            "lihtc_scenarios": run_lihtc_scenarios, "pdf_summary": run_pdf_summary,
             "comps": run_comps, "comps_grid": run_comps_grid}
 
 

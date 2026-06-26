@@ -356,6 +356,12 @@ def api_run():
         payload["scenarios"] = scns
         jid = jobs.create_job("lihtc_scenarios", payload, actor=_actor())
         return jsonify({"job_id": jid})
+    if mode == "pdf_summary":
+        from_jid = data.get("from_job")
+        if not from_jid:
+            return jsonify({"error": "No source scenario job provided."}), 400
+        jid = jobs.create_job("pdf_summary", {"from_job": from_jid}, actor=_actor())
+        return jsonify({"job_id": jid})
     if mode == "comps":
         address = (data.get("address") or "").strip()
         if not address:
