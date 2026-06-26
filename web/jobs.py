@@ -597,9 +597,30 @@ def run_lihtc_scenarios(job):
         scn_files.append((f"{deal} — {scn['name']}.xlsm", blob))
         job["completed"] += 1
 
+    # Try to generate a branded PDF one-pager alongside the models.
+    pdf_blob = None
+    try:
+        import deal_onepager as _op
+        pdf_deal = _op.preliminary_deal(
+            name=deal,
+            address=dd.get("address") or "",
+            dd=dd,
+            overrides=inp.get("overrides") or {},
+            scenarios=[s["name"] for s in selected],
+            as_of=datetime.datetime.now(datetime.timezone.utc).date(),
+        )
+        pdf_tmp = RUN_DIR / f"{job['id']}_onepager.pdf"
+        _op.generate(pdf_deal, str(pdf_tmp))
+        pdf_blob = pdf_tmp.read_bytes()
+        pdf_tmp.unlink(missing_ok=True)
+    except Exception:
+        pass  # PDF is a nice-to-have; don't fail the job
+
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for arc, blob in scn_files:
             z.writestr(arc, blob)
+        if pdf_blob:
+            z.writestr(f"{_safe_name(deal)} — One Pager.pdf", pdf_blob)
 
     job["file"] = str(zip_path)
     job["filename"] = f"{_safe_name(deal)}_scenarios.zip"

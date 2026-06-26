@@ -403,6 +403,10 @@ const CompEditor = {
       `<tr><td class="cm-rowlab">${label}</td>` +
       `<td><input type="number" data-who="subject" data-k="${key}" value="${subj[key] ?? ""}"></td>` +
       comps.map((c, i) => `<td><input type="number" data-who="${i}" data-k="${key}" value="${c[key] ?? ""}"></td>`).join("") + `</tr>`;
+    const txtRow = (label, key) =>
+      `<tr><td class="cm-rowlab">${label}</td>` +
+      `<td><input type="text" data-who="subject" data-k="${key}" data-txt="1" value="${esc(subj[key] ?? "")}"></td>` +
+      comps.map((c, i) => `<td>${esc(c[key] ?? "—")}</td>`).join("") + `</tr>`;
     const infoRow = (label, vals) =>
       `<tr class="cm-info"><td class="cm-rowlab">${label}</td><td>—</td>` +
       vals.map(v => `<td>${esc(v ?? "—")}</td>`).join("") + `</tr>`;
@@ -418,6 +422,7 @@ const CompEditor = {
     $("#comp-matrix").innerHTML = `<table class="comp-matrix"><thead><tr>${colH}</tr></thead>
       <tbody>
         ${incRow}
+        ${txtRow("City", "city")}
         ${infoRow("Distance (mi)", comps.map(c => c.distance_mi))}
         ${numRow("Unit Size (SF)", "sf")}
         ${numRow("Base Rent ($)", "rent")}
@@ -461,7 +466,11 @@ const CompEditor = {
         const target = who === "subject" ? bed.subject : bed.comps[Number(who)];
         if (el.dataset.inc) { target.include = el.checked; return; }
         if (el.dataset.g) { target[el.dataset.g][el.dataset.l] = el.checked; }
-        else if (el.dataset.k) { target[el.dataset.k] = el.value === "" ? null : Number(el.value); }
+        else if (el.dataset.k) {
+          target[el.dataset.k] = el.dataset.txt
+            ? el.value
+            : (el.value === "" ? null : Number(el.value));
+        }
         this.refreshComputed();
       });
     });
@@ -591,7 +600,8 @@ function poll(jobId) {
 function render(job) {
   $("#phase").textContent = job.phase || "";
   if (job.geo) {
-    $("#matched").textContent = `${job.geo.matched_address}  ·  tract ${job.geo.geoid}`;
+    $("#matched").textContent = job.geo.matched_address
+      + (job.geo.geoid ? `  ·  tract ${job.geo.geoid}` : "");
   }
 
   const pct = job.total ? Math.round((job.completed / job.total) * 100) : (job.status === "running" ? 8 : 0);
