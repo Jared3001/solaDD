@@ -53,6 +53,116 @@ UTILITY_LABELS = list(UTILITY_VALUES)
 # Comps whose Adjusted Rent / Base Rent exceeds this must be justified (grid row 84).
 GUARDRAIL = 1.10
 
+# ---- amenity / utility auto-detection from scraped free-text ----------------------
+# Each label maps to a list of lowercase substrings that trigger it.
+# Matching is case-insensitive substring — acceptable imprecision since the
+# analyst reviews every box in the web editor before generating the grid.
+_LABEL_PATTERNS = {
+    "Central Heat/Cool":       ["central a/c", "central air", "central heat", "central cool",
+                                 "air conditioning", "hvac", "forced air"],
+    "Blinds":                  ["blind", "window covering", "window treatment"],
+    "Carpet":                  ["carpet"],
+    "Ceiling Fan":             ["ceiling fan"],
+    "Skylight":                ["skylight"],
+    "Storage Closet":          ["storage clos", "storage unit", "extra storage"],
+    "Coat Closet":             ["coat closet"],
+    "Walk-In Closet":          ["walk-in closet", "walk in closet"],
+    "Fireplace":               ["fireplace"],
+    "Patio/Balcony":           ["patio", "balcony", "terrace"],
+    "Refrigerator":            ["refrigerator", "fridge"],
+    "Stove/Oven":              ["stove", "oven", "range", "cooktop"],
+    "Dishwasher":              ["dishwasher"],
+    "Garbage Disposal":        ["garbage disposal", "disposal"],
+    "Microwave":               ["microwave"],
+    # "in-unit" / "included" patterns checked before bare "washer/dryer" to avoid
+    # matching "Washer/Dryer Hookups" strings at both labels.
+    "Washer/Dryer":            ["in-unit washer", "in unit washer", "washer/dryer in",
+                                 "w/d in unit", "in-unit laundry", "in unit laundry",
+                                 "washer and dryer", "washer/dryer included",
+                                 "laundry in unit"],
+    "Washer/Dryer Hook-ups":   ["hookup", "hook-up", "hook up", "w/d connection",
+                                 "washer/dryer hook"],
+    "Surface Parking":         ["surface parking", "open parking", "uncovered parking",
+                                 "parking lot"],
+    "Carport":                 ["carport", "covered parking"],
+    "Underground Parking":     ["underground parking", "subterranean", "below grade"],
+    "Detached Garage":         ["detached garage"],
+    "Attached Garage":         ["attached garage"],
+    "Tuck-under Garage":       ["tuck-under", "tuck under"],
+    "Parking Garage":          ["parking garage", "parking structure"],
+    "Clubhouse/Community Room":["clubhouse", "community room", "club house",
+                                 "community center"],
+    "Swimming Pool":           ["swimming pool", " pool", "pool "],
+    "Spa/Jacuzzi":             ["spa", "jacuzzi", "hot tub", "whirlpool"],
+    "Exercise Room":           ["fitness center", "exercise room", "exercise facilit",
+                                 "fitness room", "workout room", " gym", "gym "],
+    "Picnic Area":             ["picnic", "bbq", "barbecue", "outdoor grill", "grill area"],
+    "Tot Lot/Playground":      ["playground", "tot lot", "play area"],
+    "Tennis Court":            ["tennis"],
+    "Basketball Court":        ["basketball"],
+    "Volleyball Court":        ["volleyball"],
+    "On Site Manager":         ["on site manager", "onsite manager", "resident manager",
+                                 "on-site manager"],
+    "Laundry Room":            ["laundry room", "shared laundry", "on-site laundry",
+                                 "common laundry", "laundry facilit", "community laundry",
+                                 "coin laundry", "laundry on site", "laundry on premises"],
+    "Computer Room":           ["computer room"],
+    "Business Center":         ["business center"],
+    "Car Wash Area":           ["car wash"],
+    "Gated":                   ["gated", "controlled access", "security gate",
+                                 "gate entry", "key fob", "key-fob"],
+    "Courtesy Patrol":         ["courtesy patrol", "security patrol", "security guard"],
+    "Surveillance Camera":     ["surveillance", "security camera", "cctv"],
+}
+
+# Utility: patterns that indicate the utility is INCLUDED in rent (landlord pays).
+# Matched → flag set to "" (not truthy = landlord pays, no tenant adjustment).
+# No match → key absent from result (unknown — analyst fills in the editor).
+_UTILITY_INCLUDED = {
+    "Water": ["water included", "water paid", "water/sewer", "water & sewer",
+              "utilities included", "all utilities", "all util"],
+    "Sewer": ["sewer included", "sewer paid", "water/sewer", "water & sewer",
+              "utilities included", "all utilities", "all util"],
+    "Trash": ["trash included", "trash paid", "trash service included",
+              "garbage included", "utilities included", "all utilities", "all util"],
+}
+
+
+def map_amenities(raw_list):
+    """amenities_raw (list of free-text strings) → {CTCAC_label: 'X'} dict.
+
+    Case-insensitive substring match against _LABEL_PATTERNS. Multiple labels can
+    fire from one raw string. False positives are acceptable — the analyst reviews
+    every checkbox in the web editor before the grid is generated."""
+    if not raw_list:
+        return {}
+    flags = {}
+    normalized = [" " + s.lower() + " " for s in raw_list if isinstance(s, str)]
+    for label, patterns in _LABEL_PATTERNS.items():
+        for text in normalized:
+            if any(pat in text for pat in patterns):
+                flags[label] = "X"
+                break
+    return flags
+
+
+def map_utilities(raw_list):
+    """amenities_raw → {utility_label: ''} for utilities detected as landlord-paid.
+
+    '' (falsy) = included in rent; absent key = unknown (analyst fills).
+    'X' (tenant pays) would require explicit 'tenant pays X' text — rare on Zillow,
+    so we only emit the landlord-pays signal here."""
+    if not raw_list:
+        return {}
+    flags = {}
+    normalized = [" " + s.lower() + " " for s in raw_list if isinstance(s, str)]
+    for label, patterns in _UTILITY_INCLUDED.items():
+        for text in normalized:
+            if any(pat in text for pat in patterns):
+                flags[label] = ""   # included → landlord pays
+                break
+    return flags
+
 
 def amenity_value(label):
     return AMENITY_OVERRIDE.get(label, AMENITY_DEFAULT)

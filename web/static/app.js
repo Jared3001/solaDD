@@ -7,6 +7,7 @@ const SECTION_ORDER = SECTIONS.map(s => s.id);
 let mode = "single";
 let pollTimer = null;
 let lastDDJob = null;       // most recent completed DD run, for "Generate financial model"
+let lastDDAddress = "";     // matched address from the most recent completed DD run
 
 const $ = sel => document.querySelector(sel);
 
@@ -95,10 +96,18 @@ $("#gen-model").addEventListener("click", () => {
   genModelFrom(lastDDJob);
 });
 
-// "→ Financial model" next to any previously completed checklist in Recent runs.
+// "→ Rent comps" from the just-completed DD run.
+$("#gen-comps").addEventListener("click", () => {
+  if (!lastDDJob) return;
+  genCompsFrom(lastDDJob, lastDDAddress);
+});
+
+// "→ Financial model" / "→ Rent comps" next to any previously completed checklist in Recent runs.
 $("#recent-body").addEventListener("click", (e) => {
   const btn = e.target.closest(".rc-gen");
   if (btn && btn.dataset.job) genModelFrom(btn.dataset.job);
+  const compsBtn = e.target.closest(".rc-comps");
+  if (compsBtn && compsBtn.dataset.job) genCompsFrom(compsBtn.dataset.job, compsBtn.dataset.addr || "");
 });
 
 // Open the Review & Edit step seeded with the auto-derived model inputs; on
@@ -114,6 +123,43 @@ async function genModelFrom(jobId) {
     showError(err.message);
   }
 }
+
+// Open the comp pre-flight panel seeded with the DD job's matched address.
+function genCompsFrom(jobId, address) {
+  showError(null);
+  CompsPreFlight.open(jobId, address || "");
+}
+
+// ---------- comp pre-flight — address + bed-type confirmation before launching a comp run ----------
+const CompsPreFlight = {
+  jobId: null,
+  open(jobId, address) {
+    this.jobId = jobId;
+    // Strip assemblage suffix, e.g. "123 Main St (+2 parcels)" → "123 Main St"
+    const addr = address.replace(/\s*\(\+\d+ parcels?\)\s*$/, "").trim();
+    $("#cpf-address").value = addr;
+    // Default to 1BR + 2BR
+    document.querySelectorAll(".cpf-bed").forEach(cb => {
+      cb.checked = cb.value === "1" || cb.value === "2";
+    });
+    $("#cpf-error").classList.add("hidden");
+    $("#cpf-panel").classList.remove("hidden");
+    $("#cpf-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+  },
+  close() { $("#cpf-panel").classList.add("hidden"); },
+};
+$("#cpf-cancel").addEventListener("click", () => CompsPreFlight.close());
+$("#cpf-go").addEventListener("click", () => {
+  const addr = $("#cpf-address").value.trim();
+  const beds = [...document.querySelectorAll(".cpf-bed:checked")].map(c => Number(c.value));
+  const err = $("#cpf-error");
+  if (!addr) { err.textContent = "Enter the subject address."; err.classList.remove("hidden"); return; }
+  if (!beds.length) { err.textContent = "Select at least one bed type."; err.classList.remove("hidden"); return; }
+  err.classList.add("hidden");
+  CompsPreFlight.close();
+  launch({ method: "POST", headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ mode: "comps", address: addr, beds }) });
+});
 
 function openModelReview(jobId, intake) {
   const o = intake.options;
@@ -315,7 +361,7 @@ const CompEditor = {
       this.beds[bt.bed] = {
         subject: { sf: null, rent: null, year: null, baths: null, city: "",
                    amenities: {}, utilities: {} },
-        comps: bt.comps.map(c => ({ ...c, include: true, amenities: {}, utilities: {} })),
+        comps: bt.comps.map(c => ({ ...c, include: true, amenities: c.amenity_flags || {}, utilities: c.utility_flags || {} })),
       };
     });
     this.active = intake.beds[0] ? intake.beds[0].bed : 0;
@@ -559,11 +605,13 @@ function render(job) {
     dl.classList.remove("hidden");
   }
 
-  // Offer "Generate financial model" once a DD run (single/assemblage) is downloadable.
+  // Offer "Generate financial model" and "→ Rent comps" once a DD run is downloadable.
   const isDD = job.kind === "single" || job.kind === "assemblage";
   if (isDD && job.downloadable) {
     lastDDJob = job.id;
+    lastDDAddress = job.geo ? job.geo.matched_address : "";
     $("#gen-model").classList.remove("hidden");
+    $("#gen-comps").classList.remove("hidden");
   }
 
   if (job.parcels) renderParcels(job);
@@ -686,8 +734,10 @@ function resetStatus() {
   $("#uw-panel").classList.add("hidden");
   $("#uw-body").innerHTML = "";
   $("#review-panel").classList.add("hidden");
+  $("#cpf-panel").classList.add("hidden");
   $("#comp-panel").classList.add("hidden");
   $("#gen-model").classList.add("hidden");
+  $("#gen-comps").classList.add("hidden");
   $("#download").classList.add("hidden");
   $("#matched").textContent = "";
   $("#progress-bar").style.width = "0%";
@@ -746,7 +796,8 @@ async function loadRecent() {
         <td>${run.fields}${run.flags ? ` <span class="rc-flag" title="${run.flags} field(s) need manual verification">⚑ ${run.flags}</span>` : ""}</td>
         <td class="rc-when">${esc(fmtWhen(run.finished))}</td>
         <td class="rc-actions">
-          ${run.can_model ? `<button class="rc-gen" type="button" data-job="${esc(run.id)}" title="Build Stick + Modular pro-forma from this checklist">→ Financial model</button>` : ""}
+          ${run.can_model ? `<button class="rc-gen" type="button" data-job="${esc(run.id)}" title="Build LIHTC v28 model from this checklist">→ Financial model</button>` : ""}
+          ${run.can_comps ? `<button class="rc-comps" type="button" data-job="${esc(run.id)}" data-addr="${esc(run.label)}" title="Collect rent comps for this site">→ Rent comps</button>` : ""}
           ${run.downloadable ? `<a class="rc-dl" href="/api/download/${run.id}">Download</a>` : ""}
         </td>
       </tr>`).join("");

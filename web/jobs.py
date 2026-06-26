@@ -615,11 +615,21 @@ def run_comps(job):
     inp = job["input"]
     addr = (inp.get("address") or "").strip()
     beds = inp.get("beds") or [0, 1, 2]
-    demo = not os.environ.get("RENTCAST_API_KEY")
-    job["phase"] = ("Demo data (no RentCast key set) — " if demo else "") + \
-                   f"Geocoding subject and shortlisting comps for beds {beds}…"
+    # Source priority: ai (Firecrawl+Gemini) > rentcast > demo
+    has_ai = bool(os.environ.get("FIRECRAWL_API_KEY") and os.environ.get("GEMINI_API_KEY"))
+    has_rentcast = bool(os.environ.get("RENTCAST_API_KEY"))
+    if has_ai:
+        source, demo = "ai", False
+        job["phase"] = f"Scraping Zillow for beds {beds} via Firecrawl + Gemini…"
+    elif has_rentcast:
+        source, demo = "rentcast", False
+        job["phase"] = f"Geocoding subject and shortlisting comps for beds {beds}…"
+    else:
+        source, demo = "ai", True
+        job["phase"] = f"Demo data (no API keys set) — beds {beds}…"
     geo, by_bed = _comps.collect_comps(addr, beds, _comps.rentcast.DEFAULT_RADIUS_MI,
-                                       inp.get("top", 4), demo=demo, use_avm=not demo)
+                                       inp.get("top", 4), demo=demo, use_avm=(source == "rentcast" and not demo),
+                                       source=source)
     job["geo"] = {"matched_address": geo["matched_address"],
                   "lat": round(geo["lat"], 6), "lon": round(geo["lon"], 6)}
     job["label"] = geo["matched_address"] + " — rent comps"
@@ -649,7 +659,9 @@ def comps_intake(jid):
                      "comps": [{"address": c.get("address"), "city": c.get("city"),
                                 "distance_mi": c.get("distance_mi"),
                                 "sf": c.get("unit_size_sf"), "rent": c.get("base_rent"),
-                                "year": c.get("year_built"), "baths": c.get("bathrooms")}
+                                "year": c.get("year_built"), "baths": c.get("bathrooms"),
+                                "amenity_flags": c.get("amenity_flags") or {},
+                                "utility_flags": c.get("utility_flags") or {}}
                                for c in rows]})
     return {"label": job.get("label") or jid, "geo": job.get("geo"),
             "beds": beds, "ruleset": ruleset}
@@ -864,8 +876,9 @@ def recent_jobs(n=12):
             "id": j["id"], "kind": j["kind"], "label": j.get("label") or j["id"],
             "finished": j.get("finished"), "fields": nfields, "flags": nflags,
             "downloadable": _downloadable(j),
-            # a DD checklist (not a model) with a file on disk can seed a financial model
+            # a DD checklist (not a model) with a file on disk can seed a financial model or comp run
             "can_model": j["kind"] in ("single", "assemblage") and _downloadable(j),
+            "can_comps": j["kind"] in ("single", "assemblage") and _downloadable(j),
         })
     return out
 

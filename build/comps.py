@@ -3,27 +3,36 @@
 comps.py — comp-collection stage (DD checklist -> financial model -> COMPS -> 1-pager).
 
 Given a subject address + the bed counts to comp, this pulls nearby rental
-listings (RentCast prototype backend; see sources/rentcast.py), rolls the
-unit-level listings up into buildings, shortlists the closest N as candidate
-comps, computes the Tier-A math (distance, $/SF, weighted averages), and writes a
-rent-comparability grid that mirrors the SoLa CTCAC template
-(template/comp_grid_reference.xlsx) — one sheet per bed count.
+listings, rolls the unit-level listings up into buildings, shortlists the closest
+N as candidate comps, computes the Tier-A math (distance, $/SF, weighted
+averages), and writes a rent-comparability grid that mirrors the SoLa CTCAC
+template (template/comp_grid_reference.xlsx) — one sheet per bed count.
 
 WHAT THIS FILLS (and the honest limits):
   * Tier A (VERIFIED-from-data): address, city, distance, unit size SF, base rent,
     $/SF, # beds, # baths, year built, plus the computed aggregate/weighted rows.
   * Tier B (JUDGMENT): # units & # stories are ESTIMATED from the listing rollup;
-    amenities are filled only if the source carries them (RentCast rarely does).
+    amenities are filled only if the source carries them.
   * Tier C (MANUAL): the per-row $ ADJUSTMENT columns, vacancy, turnover, waiting
     list, concessions, utilities split — appraiser judgment, left blank on purpose.
 
 Comp SELECTION stays human-in-the-loop: this auto-shortlists candidates; the
 analyst confirms which go in the final grid (mirrors the rest of the DD pipeline).
 
+Sources (--source flag):
+  ai        Zillow via Firecrawl + Gemini (DEFAULT) — scrapes Zillow rental search
+            pages, extracts structured records with Gemini 2.5 Flash (same key as OM
+            extraction). Richer amenity data when cards show it; year_built and exact
+            sqft sometimes absent from search cards. Needs FIRECRAWL_API_KEY +
+            GEMINI_API_KEY. ToS: deal-level use only.
+  rentcast  RentCast API — unit-level listings, 50 calls/mo free.
+            Needs RENTCAST_API_KEY.
+
 Usage:
   python3 build/comps.py "17719 Kinzie St, Northridge, CA" --beds 1 --demo
   python3 build/comps.py "17719 Kinzie St, Northridge, CA" --beds 0 1 2 --out comps.xlsx
-  (live mode needs RENTCAST_API_KEY; --demo uses the offline fixture)
+  python3 build/comps.py "17719 Kinzie St, Northridge, CA" --beds 1 --source ai
+  (--demo uses the offline fixture for whichever source is selected)
 """
 import argparse
 import os
@@ -34,7 +43,18 @@ from collections import defaultdict
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "sources"))
 import _arcgis as ag          # haversine_m(lon1,lat1,lon2,lat2) -> meters
 import rentcast
+import ai_scraper
 from geocoder import geocode
+
+_ZIP_RE = re.compile(r"\b(\d{5})\b")
+
+
+def _extract_zip(matched_address: str) -> str:
+    """Pull the ZIP code out of the Census geocoder's matchedAddress string.
+    matchedAddress format: '17719 KINZIE ST, NORTHRIDGE, CA, 91325'
+    Take the LAST 5-digit token — the house number at the front would match first."""
+    matches = _ZIP_RE.findall(matched_address or "")
+    return matches[-1] if matches else ""
 
 M_PER_MILE = 1609.344
 BEDS_TO_SHEET = {0: "STUDIO MARKET", 1: "1 BEDROOM MARKET", 2: "2 BEDROOM MARKET",
@@ -106,6 +126,8 @@ def rollup_buildings(listings, subj_lat, subj_lon):
             "rent_trend": trend,                # concession/trend signal from price history
             "correlation": round(corr, 3) if corr is not None else None,  # RentCast similarity (AVM)
             "sqft_flag": sqft_flag,             # set when reported sqft was implausible & dropped
+            "listing_url": units[0].get("listing_url"),   # Zillow property page for detail pass
+            "amenities_raw": units[0].get("amenities_raw") or [],
         })
     # AVM-curated comps (with a correlation score) rank first; ties broken by distance.
     comps.sort(key=lambda c: (-(c["correlation"] or 0), c["distance_mi"] is None,
@@ -119,20 +141,25 @@ def _max(xs):
 
 
 def collect_comps(subject_addr, beds, radius_mi, top_n, demo=False, use_avm=False,
-                  subj_sqft=None):
+                  subj_sqft=None, source="ai"):
     """-> (subject_geo, {bed: {comps, estimate}}). Shortlists top_n per bed.
 
-    Sources merged when --avm is on: the listings search (carries price history →
-    concession signal) plus RentCast's rent-AVM comparables (carry a correlation
-    similarity score + a subject rent estimate). Deduped by listing id."""
+    source='rentcast' (default): RentCast API; source='ai': Firecrawl+Claude scraper.
+    When source='ai' and --avm is requested the AVM flag is silently ignored
+    (RentCast AVM is not available for the ai source)."""
     geo = {"matched_address": subject_addr, "lat": 34.2502, "lon": -118.5320} if demo \
         else geocode(subject_addr)
     subj_sqft = subj_sqft or {}
+    zipcode = _extract_zip(geo.get("matched_address", ""))
     by_bed = {}
     for b in beds:
         estimate = None
         if demo:
-            pool = rentcast.demo_rentals(b)
+            pool = (ai_scraper.demo_rentals(b) if source == "ai"
+                    else rentcast.demo_rentals(b))
+        elif source == "ai":
+            pool = ai_scraper.search_rentals(geo["lat"], geo["lon"], b,
+                                             zipcode=zipcode)
         else:
             pool = rentcast.search_rentals(geo["lat"], geo["lon"], b, radius_mi)
             if use_avm:
@@ -142,7 +169,16 @@ def collect_comps(subject_addr, beds, radius_mi, top_n, demo=False, use_avm=Fals
                 have = {p["id"] for p in pool}
                 pool += [c for c in avm["comps"] if c["id"] not in have]
         comps = rollup_buildings(pool, geo["lat"], geo["lon"])
-        by_bed[b] = {"comps": comps[:top_n], "estimate": estimate}
+        shortlisted = comps[:top_n]
+        if source == "ai" and not demo:
+            ai_scraper.enrich_comps(shortlisted, b)
+            # recompute value_ratio now that sqft is filled
+            for c in shortlisted:
+                if c.get("unit_size_sf") is None and c.get("sqft"):
+                    c["unit_size_sf"] = c["sqft"]
+                if c.get("base_rent") and c.get("unit_size_sf"):
+                    c["value_ratio"] = round(c["base_rent"] / c["unit_size_sf"], 2)
+        by_bed[b] = {"comps": shortlisted, "estimate": estimate}
     return geo, by_bed
 
 
@@ -359,15 +395,17 @@ def main():
     ap.add_argument("--radius", type=float, default=rentcast.DEFAULT_RADIUS_MI, help="search radius (mi)")
     ap.add_argument("--top", type=int, default=3, help="comps to shortlist per bed count")
     ap.add_argument("--avm", action="store_true",
-                    help="also pull RentCast rent-AVM comps (adds similarity score + rent estimate)")
-    ap.add_argument("--demo", action="store_true", help="use offline fixture (no API key)")
+                    help="also pull RentCast rent-AVM comps (adds similarity score + rent estimate; rentcast source only)")
+    ap.add_argument("--source", choices=["rentcast", "ai"], default="ai",
+                    help="comp data source: 'ai' (Firecrawl+Gemini, default) or 'rentcast' (API)")
+    ap.add_argument("--demo", action="store_true", help="use offline fixture (no API keys needed)")
     ap.add_argument("--ctcac", action="store_true",
                     help="write the formatted CTCAC grid (subject + comps + adjustments) instead of the clean grid")
     ap.add_argument("--out", default="build/_comps_demo.xlsx", help="output xlsx path")
     args = ap.parse_args()
 
     geo, by_bed = collect_comps(args.subject, args.beds, args.radius, args.top,
-                                demo=args.demo, use_avm=args.avm)
+                                demo=args.demo, use_avm=args.avm, source=args.source)
     _print_summary(geo, by_bed)
     path = (write_ctcac_grid(geo, by_bed, args.out) if args.ctcac
             else write_grid(geo, by_bed, args.out))

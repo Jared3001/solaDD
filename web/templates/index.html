@@ -102,6 +102,7 @@
           </div>
           <div class="status-actions">
             <button id="gen-model" class="download-btn ghost hidden" type="button">Generate financial model</button>
+            <button id="gen-comps" class="download-btn ghost hidden" type="button">→ Rent comps</button>
             <a id="download" class="download-btn hidden" href="#">Download .xlsx</a>
           </div>
         </div>
@@ -152,6 +153,37 @@
         <p id="scn-error" class="error-banner hidden"></p>
       </section>
 
+      <section id="cpf-panel" class="panel hidden">
+        <div class="review-head">
+          <div>
+            <h2 class="recent-head">Rent comp pre-flight</h2>
+            <p class="hint">Confirm the subject address and select which bed types to collect comps for. You can edit the address — it's pre-filled from the DD run.</p>
+          </div>
+          <div class="status-actions">
+            <button id="cpf-cancel" class="download-btn ghost" type="button">Cancel</button>
+            <button id="cpf-go" class="download-btn" type="button">Find comps</button>
+          </div>
+        </div>
+        <div class="review-grid">
+          <div class="review-inputs">
+            <div class="rv-field">
+              <label for="cpf-address">Subject address</label>
+              <input type="text" id="cpf-address" autocomplete="off" placeholder="123 Main St, Los Angeles, CA 90001">
+            </div>
+            <div class="rv-field">
+              <label>Bed types to collect</label>
+              <div class="comp-beds">
+                <label><input type="checkbox" class="cpf-bed" value="0"> Studio</label>
+                <label><input type="checkbox" class="cpf-bed" value="1" checked> 1BR</label>
+                <label><input type="checkbox" class="cpf-bed" value="2" checked> 2BR</label>
+                <label><input type="checkbox" class="cpf-bed" value="3"> 3BR</label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p id="cpf-error" class="error-banner hidden"></p>
+      </section>
+
       <section id="comp-panel" class="panel hidden">
         <div class="review-head">
           <div>
@@ -178,7 +210,7 @@
 
       <section id="recent-panel" class="panel hidden">
         <h2 class="recent-head">Completed checklists</h2>
-        <p class="hint">Re-download a finished checklist, or click <strong>→ Financial model</strong> to build the LIHTC v28 model (plus legacy Stick + Modular) straight from it. Persists across redeploys.</p>
+        <p class="hint">Re-download a finished checklist, click <strong>→ Financial model</strong> to build the LIHTC v28 model straight from it, or click <strong>→ Rent comps</strong> to collect a CTCAC-style rent-comp grid for the site. Persists across redeploys.</p>
         <table class="recent-table">
           <thead><tr><th>Site</th><th>Type</th><th>Fields</th><th>When</th><th></th></tr></thead>
           <tbody id="recent-body"></tbody>
