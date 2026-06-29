@@ -186,7 +186,12 @@ HEADLINE = {
 }
 
 # Cells read per scenario for the PDF comparison table (HEADLINE + unit count + NRSF).
-SCENARIO_READ = list(HEADLINE.values()) + ["C14", "C17"]
+# Plus dev-fee tranche cells for the deal-tracker export:
+#   C47 = Developer Fee (total)            D97 = Capitalized Dev Fee (= C47 - D71)
+#   D71 = Deferred Developer Fee           C24 = Sponsor Funds Needed (in HEADLINE)
+#   C30 = Tiebreak Score (in HEADLINE)
+# The tracker's "Capitalized Dev Fee 30%/70%" columns are a fixed partition of D97.
+SCENARIO_READ = list(HEADLINE.values()) + ["C14", "C17", "C47", "D97", "D71"]
 
 
 # Friendly input name -> (Pro_Forma cell, is_text). The true editable inputs

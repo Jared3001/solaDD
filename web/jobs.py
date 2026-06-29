@@ -752,6 +752,7 @@ def run_pdf_summary(job):
             vals = {}
         tdc   = vals.get("D55")
         units = vals.get("C14")
+        cap_fee = vals.get("D97")   # Capitalized Dev Fee (= total C47 - deferred D71)
         return {
             "name":    scn["name"],
             "constr":  scn["constr"],
@@ -766,6 +767,15 @@ def run_pdf_summary(job):
                 "moic":      vals.get("C26"),
                 "perm_loan": vals.get("D75"),
                 "tc_equity": vals.get("D80"),
+                # Dev-fee tranches for the deal tracker. The tracker splits the
+                # capitalized fee 30/70 (a fixed payout convention, not a model output).
+                "total_dev_fee":       vals.get("C47"),
+                "capitalized_dev_fee": cap_fee,
+                "cap_dev_fee_30":      round(cap_fee * 0.30) if cap_fee else None,
+                "cap_dev_fee_70":      round(cap_fee * 0.70) if cap_fee else None,
+                "deferred_dev_fee":    vals.get("D71"),
+                "sponsor_funds":       vals.get("C24"),
+                "tiebreaker":          vals.get("C30"),
             },
         }
 
@@ -780,6 +790,10 @@ def run_pdf_summary(job):
     # Preserve the original selection order for the PDF table.
     order = {scn["name"]: i for i, scn in enumerate(selected)}
     scn_data.sort(key=lambda s: order.get(s["name"], 999))
+
+    # Expose results + source DD path for the deal-tracker export hook.
+    job["scenarios"] = scn_data
+    job["dd_file"] = str(dd_path)
 
     job["phase"] = "Generating PDF…"
     import sys, importlib
@@ -1303,6 +1317,23 @@ def _run(job):
         if job["status"] == "done":
             _bump_device(job.get("actor"), job["kind"])   # silent per-device attribution
             _persist_index()           # keep the volume index in sync with completed runs
+            _export_to_tracker(job)    # best-effort push to the shared Google Sheet
+
+
+def _export_to_tracker(job):
+    """Push a finished feasibility run into the team's Google Sheet tracker.
+
+    Best-effort and fully isolated: any failure (missing creds, network, API)
+    is swallowed so it never affects the pipeline run itself.
+    """
+    try:
+        import tracker_export as _trk
+        if job["kind"] in ("single", "assemblage"):
+            _trk.export_dd(job)
+        elif job["kind"] == "pdf_summary":
+            _trk.export_scenarios(job)
+    except Exception:
+        traceback.print_exc()
 
 
 def get_job(jid):
