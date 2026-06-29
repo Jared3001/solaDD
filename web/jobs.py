@@ -518,6 +518,10 @@ def run_underwrite(job):
     deal = deal_override or inp.get("name") or _base.get(("Pro_Forma", "B2")) or "Untitled Deal"
     job["label"] = f"{deal} — financial model"
 
+    # Deal-type selector: LIHTC (default, unchanged) vs non-LIHTC (market/mixed).
+    if (inp.get("deal_type") or "lihtc").lower() in ("nonlihtc", "non-lihtc", "market"):
+        return _run_underwrite_nonlihtc(job, dd, deal, meta)
+
     import modularz_calc as _mz
     v28_files = []  # (arcname, bytes)
     for _m in ("Modular", "Stick"):
@@ -547,6 +551,63 @@ def run_underwrite(job):
     job["total"] = job["completed"] = 1
     job["file"] = str(zip_path)
     job["filename"] = f"{_safe_name(deal)}_models.zip"
+    job["phase"] = "Complete"
+
+
+def _run_underwrite_nonlihtc(job, dd, deal, meta):
+    """Non-LIHTC (market/mixed) financial model from DD facts + a unit program +
+    comp rents (+ optional T-12 OpEx). Runs the clean pre-v28 ModularZ market
+    engine via nonlihtc_calc; the LIHTC v30 path is untouched. The unit program
+    and rents come from the review step / comp scraper via inp['nonlihtc']."""
+    inp = job["input"]
+    params = inp.get("nonlihtc") or {}
+    units_by_bed = params.get("units_by_bed")
+    rents_by_bed = params.get("rents_by_bed")
+    if not units_by_bed or not rents_by_bed:
+        raise RuntimeError(
+            "Non-LIHTC model needs a unit program (units_by_bed) and market rents "
+            "(rents_by_bed) from the review step / comp scraper.")
+
+    job["phase"] = "Building the non-LIHTC market model…"
+    import nonlihtc_calc as _nl
+    land_cost = params.get("land_cost") or _nl._parse_num(dd.get("acquisition_price"))
+    blob = _nl.build_from_dd(
+        dd, units_by_bed=units_by_bed, rents_by_bed=rents_by_bed,
+        opex=params.get("opex"), financing=params.get("financing"),
+        land_cost=land_cost, deal_name=deal,
+    )
+
+    # Headline returns for the UI (recalc the same friendly inputs). Best-effort:
+    # the .xlsx is the deliverable, so a recalc hiccup must not fail the job.
+    returns = {}
+    try:
+        friendly = _nl.build_market_inputs(
+            units_by_bed=units_by_bed, rents_by_bed=rents_by_bed,
+            land_cost=land_cost or 0, opex=params.get("opex"),
+            financing=params.get("financing"),
+        )
+        returns = _nl.recalc(friendly)
+    except Exception:  # noqa: BLE001
+        traceback.print_exc()
+
+    import zipfile
+    arc = f"{deal} — Non-LIHTC (Market).xlsx"
+    zip_path = RUN_DIR / f"{job['id']}.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(arc, blob)
+
+    job["underwrite"] = {
+        "deal": deal,
+        "deal_type": "nonlihtc",
+        "models": [arc],
+        "default_model": arc,
+        "returns": {k: _jsonable(v) for k, v in returns.items()},
+        "inputs": {k: _jsonable(v) for k, v in dd.items()},
+        "hand_fields": [],
+    }
+    job["total"] = job["completed"] = 1
+    job["file"] = str(zip_path)
+    job["filename"] = f"{_safe_name(deal)}_nonlihtc.zip"
     job["phase"] = "Complete"
 
 
@@ -824,6 +885,46 @@ def run_comps_grid(job):
 # --------------------------------------------------------------------------- #
 # review/edit step — editable model inputs from a completed DD run
 # --------------------------------------------------------------------------- #
+def _norm_addr(s):
+    """Normalize an address for loose matching: lowercase, drop the assemblage
+    suffix (e.g. '(+2 parcels)'), collapse non-alphanumerics to single spaces."""
+    import re
+    s = (s or "").lower()
+    s = re.sub(r"\s*\(\+\d+\s*parcels?\)\s*$", "", s)
+    return re.sub(r"[^a-z0-9]+", " ", s).strip()
+
+
+def latest_comp_rents(address):
+    """Median scraped market rent per bed from the most recent completed comps run
+    whose subject matches `address`. Feeds the non-LIHTC review form's rent defaults
+    straight from the AI comp scraper. Returns {rents_by_bed, counts, source_job,
+    address} or None when no matching comp run exists this session."""
+    import statistics
+    key = _norm_addr(address)
+    if not key:
+        return None
+    with _lock:
+        runs = [j for j in _jobs.values()
+                if j.get("kind") == "comps" and j.get("status") == "done"
+                and j.get("comps_data")
+                and _norm_addr((j.get("geo") or {}).get("matched_address")) == key]
+    if not runs:
+        return None
+    runs.sort(key=lambda j: j.get("finished") or "", reverse=True)
+    job = runs[0]
+    rents, counts = {}, {}
+    for b, rows in job["comps_data"].items():
+        vals = [c.get("base_rent") for c in rows
+                if isinstance(c.get("base_rent"), (int, float)) and c.get("base_rent")]
+        if vals:
+            rents[int(b)] = int(round(statistics.median(vals)))
+            counts[int(b)] = len(vals)
+    if not rents:
+        return None
+    return {"rents_by_bed": rents, "counts": counts, "source_job": job["id"],
+            "address": (job.get("geo") or {}).get("matched_address")}
+
+
 def underwrite_intake(jid):
     """The editable intake (defaults + options + derived preview) for a DD job's
     financial model. Raises ValueError if the source checklist is unavailable."""
@@ -836,6 +937,11 @@ def underwrite_intake(jid):
     dd = _underwrite.read_dd(Path(job["file"]))
     payload = _uwl.intake(dd)
     payload["label"] = job.get("label") or jid
+    # If the analyst already ran the comp scraper on this subject, surface the
+    # median market rents so the non-LIHTC form can pre-fill rents_by_bed.
+    cr = latest_comp_rents((job.get("geo") or {}).get("matched_address") or job.get("label"))
+    if cr:
+        payload["comp_rents"] = cr
     return payload
 
 

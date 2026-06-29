@@ -323,6 +323,19 @@ def api_run():
                 ov = None
         if isinstance(ov, dict) and ov:
             payload["overrides"] = ov
+        # Deal type: LIHTC (default) or non-LIHTC (market/mixed) -> different engine.
+        dt = (data.get("deal_type") or "").strip().lower()
+        if dt in ("nonlihtc", "non-lihtc", "market"):
+            payload["deal_type"] = "nonlihtc"
+            nl = data.get("nonlihtc")
+            if isinstance(nl, str) and nl:
+                import json as _json
+                try:
+                    nl = _json.loads(nl)
+                except ValueError:
+                    nl = None
+            if isinstance(nl, dict):
+                payload["nonlihtc"] = nl
         jid = jobs.create_job("underwrite", payload, actor=_actor())
         return jsonify({"job_id": jid})
     if mode == "lihtc_scenarios":
@@ -389,6 +402,35 @@ def api_underwrite_intake(jid):
         return jsonify(jobs.underwrite_intake(jid))
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
+
+
+@app.post("/api/t12/parse")
+@login_required
+def api_t12_parse():
+    # Parse an uploaded trailing-12 operating statement into the non-LIHTC engine's
+    # PUPM OpEx factors. Synchronous (a quick read) — feeds the review form's
+    # optional OpEx override. Needs the unit count for the annual -> PUPM conversion.
+    f = request.files.get("t12")
+    if not f or not f.filename:
+        return jsonify({"error": "Upload a T-12 (.xlsx) operating statement."}), 400
+    try:
+        units = int(float(request.form.get("units") or 0))
+    except (TypeError, ValueError):
+        units = 0
+    if units <= 0:
+        return jsonify({"error": "Enter the unit count first — it's needed to convert "
+                                 "annual totals to per-unit-per-month."}), 400
+    data = f.read()
+    if not data:
+        return jsonify({"error": "The uploaded T-12 is empty."}), 400
+    try:
+        import t12_parse as _t12
+        res = _t12.parse_t12(data, units)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:  # noqa: BLE001 — surface a readable parse failure
+        return jsonify({"error": f"Could not parse the T-12: {e}"}), 400
+    return jsonify(res)
 
 
 @app.get("/api/comps/intake/<jid>")

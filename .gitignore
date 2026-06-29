@@ -13,3 +13,6 @@ build/_underwriting/
 build/_qc/
 build/_qc_*.py
 build/*.xlsm
+
+# local agent config/memory
+.claude/

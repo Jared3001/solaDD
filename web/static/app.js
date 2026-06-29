@@ -182,7 +182,29 @@ $("#cpf-go").addEventListener("click", () => {
            body: JSON.stringify({ mode: "comps", address: addr, beds }) });
 });
 
+// Holds the current model-review context so the deal-type toggle can re-render
+// either review form against the same DD intake.
+let _modelReview = { jobId: null, intake: null, dealType: "lihtc" };
+
+// OpEx factors parsed from an uploaded T-12 (per-unit-per-month, plus mgmt %).
+// Populated by mountNonLihtcT12(); folded into the non-LIHTC payload on confirm.
+let _nlT12Opex = null;
+
+// Dispatcher: shows the LIHTC/Non-LIHTC toggle, then renders the chosen form.
 function openModelReview(jobId, intake) {
+  _modelReview = { jobId, intake, dealType: "lihtc" };
+  _nlT12Opex = null;
+  const tg = $("#review-dealtype");
+  if (tg) {
+    tg.classList.remove("hidden");
+    tg.querySelectorAll(".dt-opt").forEach(b =>
+      b.classList.toggle("active", b.dataset.dt === "lihtc"));
+  }
+  openLihtcReview(jobId, intake);
+}
+
+// The existing LIHTC review → scenario picker flow.
+function openLihtcReview(jobId, intake) {
   const o = intake.options;
   ReviewEditor.open({
     subtitle: `${intake.label} — adjust the automated inputs, preview, then select scenarios. Defaults are the DD answers.`,
@@ -207,6 +229,185 @@ function openModelReview(jobId, intake) {
   }, (values) => {
     ScenarioPicker.open(jobId, values);
   });
+}
+
+// Non-LIHTC (market / mixed) review → directly launches the underwrite run on the
+// clean pre-v28 ModularZ market engine. Unit program + comp rents drive it.
+function openNonLihtcReview(jobId, intake) {
+  _nlT12Opex = null;
+  const seed = intake.values || {};
+  // Comp scraper rents (median $/mo per bed) — pre-fill when the analyst already
+  // ran comps for this subject. Keys are bed ints (0=studio,1,2,3).
+  const cr = (intake.comp_rents && intake.comp_rents.rents_by_bed) || {};
+  const counts = (intake.comp_rents && intake.comp_rents.counts) || {};
+  const rentOf = (bed) => (cr[bed] != null ? Number(cr[bed]) : null);
+  const compHelp = (bed) => (counts[bed]
+    ? `auto-filled: median of ${counts[bed]} comp${counts[bed] > 1 ? "s" : ""} from the AI scraper`
+    : "from comp scraper");
+  const compNote = intake.comp_rents
+    ? `Rents pre-filled from your comp run on ${intake.comp_rents.address || "this subject"} (median $/mo per bed) — edit as needed. `
+    : "";
+  ReviewEditor.open({
+    subtitle: `${intake.label} — non-LIHTC (market) model. ${intake.comp_rents ? "Rents pre-filled from the comp scraper; c" : "Enter the unit program and market rents (from the comp scraper). C"}onfirm the unit program. The pre-v28 ModularZ engine runs in market mode.`,
+    confirmLabel: "Generate model →",
+    previewNote: compNote + "Drives the clean ModularZ market engine: restricted set-aside + affordable rows are zeroed; rents are the comp $/mo. Modular cost book has no studio product, so studios aren't modeled. Blank OpEx lines fall back to the v5.0.7 PUPM defaults.",
+    values: {
+      deal_name: seed.deal_name || "",
+      land_price: seed.acquisition_price ?? null,
+      units_1br: null, units_2br: null, units_3br: null,
+      rent_1br: rentOf(1), rent_2br: rentOf(2), rent_3br: rentOf(3),
+      exit_cap: 5, perm_rate: 5.75,
+    },
+    fields: [
+      { id: "deal_name", label: "Deal name", type: "text" },
+      { id: "land_price", label: "Land purchase price ($)", type: "number",
+        placeholder: "e.g. 5000000", help: "defaults to the DD acquisition price if blank" },
+      { id: "units_1br", label: "1-BR units", type: "number", required: true, help: "modular product" },
+      { id: "units_2br", label: "2-BR units", type: "number" },
+      { id: "units_3br", label: "3-BR units", type: "number" },
+      { id: "rent_1br", label: "1-BR market rent ($/mo)", type: "number", required: true,
+        placeholder: "from comp scraper", help: compHelp(1) },
+      { id: "rent_2br", label: "2-BR market rent ($/mo)", type: "number", help: compHelp(2) },
+      { id: "rent_3br", label: "3-BR market rent ($/mo)", type: "number", help: compHelp(3) },
+      { id: "exit_cap", label: "Exit cap (%)", type: "number", help: "base-case exit cap; default 5.0" },
+      { id: "perm_rate", label: "Perm loan rate (%)", type: "number", help: "default 5.75" },
+    ],
+    derive: deriveNonLihtcPreview,
+  }, (v) => {
+    const units = {}, rents = {};
+    const num = (x) => (x === null || x === undefined || x === "" ? null : Number(x));
+    [["1", v.units_1br], ["2", v.units_2br], ["3", v.units_3br]].forEach(([b, n]) => {
+      if (num(n) != null) units[b] = num(n);
+    });
+    [["1", v.rent_1br], ["2", v.rent_2br], ["3", v.rent_3br]].forEach(([b, r]) => {
+      if (num(r) != null) rents[b] = num(r);
+    });
+    const financing = {};
+    if (num(v.exit_cap) != null) financing.exit_cap = num(v.exit_cap) / 100;
+    if (num(v.perm_rate) != null) financing.perm_rate = num(v.perm_rate) / 100;
+    const nonlihtc = { units_by_bed: units, rents_by_bed: rents };
+    if (num(v.land_price) != null) nonlihtc.land_cost = num(v.land_price);
+    if (Object.keys(financing).length) nonlihtc.financing = financing;
+    if (_nlT12Opex && Object.keys(_nlT12Opex).length) nonlihtc.opex = _nlT12Opex;
+    launch({
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "underwrite", from_job: jobId, name: v.deal_name || null,
+        deal_type: "nonlihtc", nonlihtc,
+      }),
+    });
+  });
+  mountNonLihtcT12();
+}
+
+// Append a T-12 uploader to the non-LIHTC review form. The analyst optionally
+// drops an operating statement; we POST it to /api/t12/parse with the current
+// total unit count, then store the parsed PUPM OpEx in _nlT12Opex (folded into
+// the payload on confirm) and show what matched. Blank = engine PUPM defaults.
+function mountNonLihtcT12() {
+  const host = $("#review-inputs");
+  if (!host || host.querySelector("#nl-t12")) return;
+  const box = document.createElement("div");
+  box.id = "nl-t12";
+  box.className = "field nl-t12";
+  box.innerHTML = `
+    <label>Operating statement (T-12) — optional</label>
+    <div class="t12-row">
+      <input type="file" id="nl-t12-file" accept=".xlsx,.xls" />
+      <button type="button" id="nl-t12-parse" class="btn-secondary">Parse T-12</button>
+    </div>
+    <div class="help">Pulls real OpEx (per-unit-per-month) from a trailing-12-month statement. Property tax is skipped (the engine derives it); management becomes a % of revenue. Leave blank to use the v5.0.7 PUPM defaults.</div>
+    <div id="nl-t12-status" class="t12-status"></div>`;
+  host.appendChild(box);
+
+  const fileEl = box.querySelector("#nl-t12-file");
+  const btn = box.querySelector("#nl-t12-parse");
+  const status = box.querySelector("#nl-t12-status");
+
+  const totalUnits = () => {
+    const n = (fid) => {
+      const el = host.querySelector(`[data-fid="${fid}"]`);
+      const v = el ? Number(el.value) : 0;
+      return Number.isFinite(v) ? v : 0;
+    };
+    return n("units_1br") + n("units_2br") + n("units_3br");
+  };
+
+  btn.addEventListener("click", async () => {
+    const f = fileEl.files && fileEl.files[0];
+    if (!f) { status.innerHTML = `<span class="t12-err">Choose a T-12 .xlsx first.</span>`; return; }
+    const units = totalUnits();
+    if (!units || units <= 0) {
+      status.innerHTML = `<span class="t12-err">Enter the unit program (1/2/3-BR counts) first — needed to convert annual $ to per-unit-per-month.</span>`;
+      return;
+    }
+    status.innerHTML = `<span class="t12-muted">Parsing ${f.name} against ${units} units…</span>`;
+    btn.disabled = true;
+    try {
+      const fd = new FormData();
+      fd.append("t12", f);
+      fd.append("units", String(units));
+      const res = await fetch("/api/t12/parse", { method: "POST", body: fd });
+      const j = await res.json();
+      if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
+      _nlT12Opex = j.opex || {};
+      renderT12Result(status, j);
+    } catch (e) {
+      _nlT12Opex = null;
+      status.innerHTML = `<span class="t12-err">Couldn't parse that T-12: ${e.message}. The model will use the PUPM defaults.</span>`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+// Render the parsed-T-12 summary: matched OpEx lines (with $/unit/mo or mgmt %),
+// any unmatched expense rows, and the parser's notes.
+function renderT12Result(status, j) {
+  const matched = j.matched || [];
+  if (!matched.length) {
+    status.innerHTML = `<span class="t12-err">No OpEx lines recognized in “${j.sheet || "?"}” — check the layout. Using the PUPM defaults.</span>`;
+    return;
+  }
+  const money = (n) => "$" + Math.round(n).toLocaleString();
+  const rows = matched.map((m) => {
+    const name = m.friendly.replace(/^opex_/, "").replace(/_/g, " ");
+    const val = m.friendly === "opex_management"
+      ? ((m.pupm != null ? (m.pupm * 100).toFixed(1) : "—") + "% of revenue")
+      : (m.pupm != null ? money(m.pupm) + "/unit/mo" : "—");
+    return `<tr><td>${name}</td><td class="t12-amt">${val}</td><td class="t12-src">${money(m.annual)}/yr</td></tr>`;
+  }).join("");
+  const notes = (j.notes || []).map((n) => `<li>${n}</li>`).join("");
+  const unmatched = (j.unmatched || []).length
+    ? `<div class="t12-muted t12-unmatched">Not mapped (left at default): ${j.unmatched.map((u) => u.line).join(", ")}.</div>`
+    : "";
+  status.innerHTML = `
+    <div class="t12-ok">Parsed “${j.sheet}” — ${matched.length} OpEx line${matched.length > 1 ? "s" : ""} mapped${j.revenue ? `, revenue ${money(j.revenue)}` : ""}.</div>
+    <table class="t12-table"><thead><tr><th>Line</th><th>Engine factor</th><th>T-12 annual</th></tr></thead><tbody>${rows}</tbody></table>
+    ${unmatched}
+    ${notes ? `<ul class="t12-notes">${notes}</ul>` : ""}`;
+}
+
+// Live preview for the non-LIHTC form — mirrors the engine's market-mode rules.
+function deriveNonLihtcPreview(v) {
+  const num = (x) => (x === null || x === undefined || x === "" ? 0 : Number(x));
+  const u1 = num(v.units_1br), u2 = num(v.units_2br), u3 = num(v.units_3br);
+  const total = u1 + u2 + u3;
+  const mix = total > 0
+    ? `${Math.round(u1 / total * 100)}% 1B · ${Math.round(u2 / total * 100)}% 2B · ${Math.round(u3 / total * 100)}% 3B`
+    : "—";
+  const gpr = (u1 * num(v.rent_1br) + u2 * num(v.rent_2br) + u3 * num(v.rent_3br)) * 12;
+  return [
+    { label: "Deal", value: v.deal_name || "—" },
+    { label: "Land price (Dev Budget G7)", value: num(v.land_price) > 0 ? "$" + fmt(v.land_price) : "— DD default" },
+    { label: "Unit program (O11/O12/O13)", value: total > 0 ? `${u1} / ${u2} / ${u3} = ${total} units (+1 mgr)` : "— enter 1-BR" },
+    { label: "→ Bed mix", value: mix },
+    { label: "Market rents 1B/2B/3B", value: `$${fmt(v.rent_1br || 0)} / $${fmt(v.rent_2br || 0)} / $${fmt(v.rent_3br || 0)}` },
+    { label: "→ Annual GPR (approx)", value: gpr > 0 ? "$" + fmt(Math.round(gpr)) : "—" },
+    { label: "Exit cap (Dashboard J5)", value: (num(v.exit_cap) || 5) + "%" },
+    { label: "Perm rate (Dashboard K12)", value: (num(v.perm_rate) || 5.75) + "%" },
+    { label: "Mode", value: "Market (restricted + affordable rows zeroed)" },
+  ];
 }
 
 // ---------- scenario definitions (mirrors Python's run_lihtc_scenarios logic) ----------
@@ -573,6 +774,19 @@ const ReviewEditor = {
       + (this.schema.previewNote ? `<p class="hint">${esc(this.schema.previewNote)}</p>` : "");
   },
 };
+// Deal-type toggle inside the model-review panel — re-renders the matching form.
+$("#review-dealtype").addEventListener("click", (e) => {
+  const btn = e.target.closest(".dt-opt");
+  if (!btn || !_modelReview.intake) return;
+  const dt = btn.dataset.dt;
+  if (dt === _modelReview.dealType) return;
+  _modelReview.dealType = dt;
+  $("#review-dealtype").querySelectorAll(".dt-opt").forEach(b =>
+    b.classList.toggle("active", b === btn));
+  if (dt === "nonlihtc") openNonLihtcReview(_modelReview.jobId, _modelReview.intake);
+  else openLihtcReview(_modelReview.jobId, _modelReview.intake);
+});
+
 $("#review-cancel").addEventListener("click", () => ReviewEditor.close());
 $("#review-go").addEventListener("click", () => {
   const missing = ReviewEditor.missingRequired();
@@ -661,6 +875,7 @@ function render(job) {
 }
 
 function renderUnderwrite(uw) {
+  if (uw.deal_type === "nonlihtc") return renderUnderwriteNonLihtc(uw);
   const panel = $("#uw-panel");
   panel.classList.remove("hidden");
   $("#uw-sub").textContent = `${uw.deal} · product: ${uw.product || "—"}`
@@ -678,6 +893,41 @@ function renderUnderwrite(uw) {
     <h3 class="section-head">DD inputs used</h3>
     <table>${inRows}</table>
     <p class="hint">Left blank for the analyst to fill, then recalc in Excel: ${esc((uw.hand_fields || []).join(", "))}.</p>`;
+}
+
+// Non-LIHTC (market) result — single ModularZ market model + headline returns.
+function renderUnderwriteNonLihtc(uw) {
+  const panel = $("#uw-panel");
+  panel.classList.remove("hidden");
+  $("#uw-sub").textContent = `${uw.deal} · Non-LIHTC (market) · pre-v28 ModularZ engine`;
+
+  const PCT = new Set(["Levered IRR", "Cash-on-Cash", "Untrended Yield-on-Cost"]);
+  const MULT = new Set(["Equity Multiple"]);
+  const fmtReturn = (k, v) => {
+    if (v === null || v === undefined || v === "") return "—";
+    const n = Number(v);
+    if (Number.isNaN(n)) return esc(v);
+    if (PCT.has(k)) return (n * 100).toFixed(2) + "%";
+    if (MULT.has(k)) return n.toFixed(2) + "x";
+    return (n < 0 ? "-$" : "$") + fmt(Math.abs(Math.round(n)));
+  };
+  const ORDER = ["Levered IRR", "Equity Multiple", "Cash-on-Cash", "Untrended Yield-on-Cost",
+    "Net Operating Income", "Effective Gross Income", "Operating Expenses",
+    "Total Dev Cost", "Price per Unit", "Equity Required", "Debt", "Total Profit"];
+  const ret = uw.returns || {};
+  const keys = ORDER.filter(k => k in ret).concat(Object.keys(ret).filter(k => !ORDER.includes(k)));
+  const retRows = keys.map(k =>
+    `<tr><td class="col-field">${esc(k)}</td><td class="col-answer">${fmtReturn(k, ret[k])}</td></tr>`
+  ).join("");
+  const models = (uw.models || []).map(m => `<li>${esc(m)}</li>`).join("");
+  const haveReturns = keys.length > 0;
+  $("#uw-body").innerHTML = `
+    <p class="combined">Market model generated on the clean pre-v28 ModularZ engine — download is a .zip:</p>
+    <ul class="uw-models">${models}</ul>
+    ${haveReturns
+      ? `<h3 class="section-head">Headline returns</h3><table>${retRows}</table>`
+      : `<p class="hint">Returns didn't recalc server-side — open the .xlsx (it recalcs on load).</p>`}
+    <p class="hint">Market mode: restricted set-aside &amp; affordable unit rows zeroed; rents are the comp $/mo. Studios aren't modeled (no modular studio product).</p>`;
 }
 
 function renderOM(om) {

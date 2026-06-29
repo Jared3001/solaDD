@@ -314,6 +314,14 @@ h1, .brand-mark, .tab, .run-btn, label, th, .phase, .kicker {
 
 /* ---------- review & edit step (reusable) ---------- */
 .review-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
+.dealtype-toggle { display: inline-flex; margin-top: 10px; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: #fff; }
+.dealtype-toggle .dt-opt {
+  border: 0; background: transparent; cursor: pointer; padding: 7px 14px;
+  font-size: 13px; font-weight: 600; color: var(--gray); line-height: 1;
+}
+.dealtype-toggle .dt-opt + .dt-opt { border-left: 1px solid var(--line); }
+.dealtype-toggle .dt-opt.active { background: var(--navy); color: #fff; }
+.dealtype-toggle .dt-opt:not(.active):hover { background: var(--paper); color: var(--navy); }
 .review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
 @media (max-width: 720px) { .review-grid { grid-template-columns: 1fr; } }
 .rv-field { margin-bottom: 14px; }
@@ -325,6 +333,37 @@ h1, .brand-mark, .tab, .run-btn, label, th, .phase, .kicker {
 .rv-field input:focus, .rv-field select:focus { outline: 0; border-color: var(--mid); }
 .rv-help { display: block; font-size: 12px; color: var(--gray); margin-top: 4px; }
 .rv-req { color: #c0392b; font-weight: 700; }
+
+/* ---------- non-LIHTC T-12 uploader ---------- */
+.nl-t12 {
+  margin-top: 6px; padding-top: 14px; border-top: 1px dashed var(--line);
+}
+.nl-t12 > label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--navy); }
+.nl-t12 .help { font-size: 12px; color: var(--gray); margin-top: 6px; line-height: 1.45; }
+.t12-row { display: flex; gap: 8px; align-items: center; }
+.t12-row input[type="file"] { flex: 1; font-size: 12px; color: var(--ink); }
+.btn-secondary {
+  padding: 8px 12px; font-size: 13px; font-weight: 600; white-space: nowrap;
+  border: 1px solid var(--mid); border-radius: 6px; background: #fff; color: var(--navy); cursor: pointer;
+}
+.btn-secondary:hover { background: var(--paper); }
+.btn-secondary:disabled { opacity: .55; cursor: default; }
+.t12-status { margin-top: 10px; font-size: 12px; }
+.t12-status:empty { display: none; }
+.t12-muted { color: var(--gray); }
+.t12-err { color: #c0392b; }
+.t12-ok { color: #1e7a46; font-weight: 600; margin-bottom: 6px; }
+.t12-table { width: 100%; border-collapse: collapse; margin: 6px 0; }
+.t12-table th {
+  text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .03em;
+  color: var(--gray); padding: 3px 6px 3px 0; border-bottom: 1px solid var(--line);
+}
+.t12-table td { padding: 4px 6px 4px 0; font-size: 12px; border-bottom: 1px solid var(--line); text-transform: capitalize; }
+.t12-table td.t12-amt { text-align: right; font-weight: 600; color: var(--navy); white-space: nowrap; text-transform: none; }
+.t12-table td.t12-src { text-align: right; color: var(--gray); white-space: nowrap; text-transform: none; }
+.t12-unmatched { margin-top: 6px; }
+.t12-notes { margin: 8px 0 0; padding-left: 16px; color: var(--gray); font-size: 12px; }
+.t12-notes li { margin-bottom: 3px; }
 .review-preview {
   background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
   border-left: 4px solid var(--amber); padding: 14px 16px;
