@@ -109,8 +109,16 @@ h1, .brand-mark, .tab, .run-btn, label, th, .phase, .kicker {
 }
 .metric-big #hours-saved { color: var(--amber); }
 .metric-unit { font-family: "Archivo", sans-serif; font-size: 15px; font-weight: 600; color: #cdd6e6; }
-.metric-sub { color: #cdd6e6; font-size: 14px; }
-.metric-sub span:not(.metric-dot) { color: #fff; font-weight: 600; }
+.metric-sub { color: #cdd6e6; font-size: 14px; display: flex; flex-direction: column; gap: 8px; }
+.metric-lead { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: #9fb0c9; }
+.metric-breakdown { display: flex; flex-wrap: wrap; gap: 8px; }
+.ms-stage {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
+  border-radius: 999px; padding: 4px 11px; cursor: default;
+}
+.ms-stage .ms-runs { font-family: "IBM Plex Mono", monospace; font-weight: 600; color: var(--amber); }
+.ms-stage .ms-label { color: #e6ecf5; font-size: 13px; }
 .metric-dot { margin: 0 8px; color: var(--amber); }
 
 /* ---------- layout ---------- */

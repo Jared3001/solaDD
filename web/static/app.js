@@ -1066,8 +1066,15 @@ async function loadStats() {
     if (!r.ok) return;
     const s = await r.json();
     $("#hours-saved").textContent = fmt(s.hours_saved);
-    $("#total-automated").textContent = fmt(s.total_automated);
-    $("#per-min").textContent = s.minutes_per;
+    const bd = $("#metric-breakdown");
+    if (bd && Array.isArray(s.by_stage)) {
+      bd.innerHTML = s.by_stage.map(st => {
+        const runs = fmt(st.runs);
+        const title = `${runs} run${st.runs === 1 ? "" : "s"} × ${st.minutes_per} min ≈ ${fmt(st.hours_saved)} hrs`;
+        return `<span class="ms-stage" title="${esc(title)}">`
+          + `<span class="ms-runs">${runs}</span> <span class="ms-label">${esc(st.label)}</span></span>`;
+      }).join("");
+    }
   } catch (_) { /* leave placeholders */ }
 }
 

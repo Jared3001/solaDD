@@ -60,10 +60,30 @@ COUNTER_FILE = DATA_DIR / "counter.json"
 INDEX_FILE = DATA_DIR / "jobs_index.json"   # compact recent-runs index — survives redeploys (files already persist in DATA_DIR)
 DEVICE_FILE = DATA_DIR / "devices.json"     # per-device usage tally (silent attribution) — survives redeploys
 
-# Time-saved metric. STARTING_CHECKLISTS = sites already automated before the
-# app started counting; each automated checklist saves MINUTES_PER_CHECKLIST.
+# Time-saved metric — now spans the whole feasibility pipeline (DD -> Underwriting
+# -> Comps -> one-pager), not just the DD checklist. Each completed automated run
+# of a stage saves the analyst MINUTES_PER_STAGE[stage]; the banner sums them.
+# STARTING_CHECKLISTS = DD sites already automated before the app began counting.
 STARTING_CHECKLISTS = int(os.environ.get("STARTING_CHECKLISTS", "9"))
-MINUTES_PER_CHECKLIST = int(os.environ.get("MINUTES_PER_CHECKLIST", "30"))
+MINUTES_PER_CHECKLIST = int(os.environ.get("MINUTES_PER_CHECKLIST", "30"))  # DD (legacy name)
+
+# Map each job kind to a pipeline stage. Kinds not listed don't accrue time.
+STAGE_OF_KIND = {
+    "single": "dd", "assemblage": "dd",
+    "underwrite": "underwriting", "lihtc_scenarios": "underwriting",
+    "comps": "comps", "comps_grid": "comps",
+    "pdf_summary": "summary",
+}
+# Minutes of manual analyst work each automated stage replaces (env-overridable).
+MINUTES_PER_STAGE = {
+    "dd": MINUTES_PER_CHECKLIST,
+    "underwriting": int(os.environ.get("MINUTES_PER_UNDERWRITING", "120")),
+    "comps": int(os.environ.get("MINUTES_PER_COMPS", "90")),
+    "summary": int(os.environ.get("MINUTES_PER_SUMMARY", "45")),
+}
+STAGE_ORDER = ["dd", "underwriting", "comps", "summary"]
+STAGE_LABELS = {"dd": "Due diligence", "underwriting": "Underwriting",
+                "comps": "Rent comps", "summary": "One-pager summary"}
 _counter_lock = threading.Lock()
 _index_lock = threading.Lock()
 _device_lock = threading.Lock()
@@ -956,31 +976,62 @@ def _safe_name(s):
 # --------------------------------------------------------------------------- #
 # time-saved counter (persisted) + stats
 # --------------------------------------------------------------------------- #
-def _read_count():
+def _read_counts():
+    """Per-kind completed-run counts, persisted to the volume. Migrates the legacy
+    {"count": N} format (which only ever counted DD single/assemblage runs) by
+    treating it as DD 'single' runs so the historical number carries forward."""
     try:
-        return int(json.loads(COUNTER_FILE.read_text()).get("count", 0))
+        data = json.loads(COUNTER_FILE.read_text())
     except Exception:
-        return 0
+        return {}
+    counts = data.get("counts")
+    if isinstance(counts, dict):
+        return {k: int(v) for k, v in counts.items()}
+    legacy = int(data.get("count", 0))     # old single-integer format
+    return {"single": legacy} if legacy else {}
 
 
-def _bump_count():
+def _bump_count(kind):
+    """Record one completed run of `kind`. Also writes a legacy `count` (DD total)
+    so older code/readers still see a sensible DD number."""
     with _counter_lock:
-        n = _read_count() + 1
+        counts = _read_counts()
+        counts[kind] = counts.get(kind, 0) + 1
+        dd = sum(counts.get(k, 0) for k, s in STAGE_OF_KIND.items() if s == "dd")
         try:
-            COUNTER_FILE.write_text(json.dumps({"count": n}))
+            COUNTER_FILE.write_text(json.dumps({"counts": counts, "count": dd}))
         except Exception:
             traceback.print_exc()
-        return n
+        return counts
 
 
 def stats():
-    runs = _read_count()
-    total = STARTING_CHECKLISTS + runs
-    minutes = total * MINUTES_PER_CHECKLIST
+    counts = _read_counts()
+    # group raw per-kind counts into pipeline stages
+    by_stage = {s: 0 for s in MINUTES_PER_STAGE}
+    for kind, n in counts.items():
+        stage = STAGE_OF_KIND.get(kind)
+        if stage:
+            by_stage[stage] = by_stage.get(stage, 0) + int(n)
+    by_stage["dd"] += STARTING_CHECKLISTS          # DD sites automated pre-counting
+
+    stage_minutes = {s: by_stage[s] * MINUTES_PER_STAGE[s] for s in by_stage}
+    minutes = sum(stage_minutes.values())
+    dd_runs = counts.get("single", 0) + counts.get("assemblage", 0)
+
+    breakdown = [{
+        "stage": s, "label": STAGE_LABELS[s], "runs": by_stage[s],
+        "minutes_per": MINUTES_PER_STAGE[s], "minutes_saved": stage_minutes[s],
+        "hours_saved": round(stage_minutes[s] / 60, 1),
+    } for s in STAGE_ORDER]
+
     return {
-        "app_runs": runs, "starting": STARTING_CHECKLISTS,
-        "total_automated": total, "minutes_per": MINUTES_PER_CHECKLIST,
+        "app_runs": dd_runs, "starting": STARTING_CHECKLISTS,
+        "total_automated": by_stage["dd"],          # DD checklists incl. baseline (back-compat)
+        "minutes_per": MINUTES_PER_CHECKLIST,        # DD per-run minutes (back-compat)
         "minutes_saved": minutes, "hours_saved": round(minutes / 60, 1),
+        "total_runs": sum(int(v) for v in counts.values()),
+        "by_stage": breakdown,
     }
 
 
@@ -1045,20 +1096,23 @@ def _bump_device(actor, kind):
 def device_totals():
     """Per-device usage breakdown for the admin view, newest-active first.
 
-    'dd_runs' = single + assemblage (the runs that map to the time-saved metric);
-    'hours_saved' mirrors stats() so a person's number is comparable to the banner."""
+    'dd_runs' = single + assemblage (DD checklists); 'hours_saved' now spans the
+    whole pipeline (each kind's runs x its stage minutes), so a person's number is
+    comparable to the banner."""
     d = _read_devices()
     out = []
     for did, rec in d.items():
         counts = rec.get("counts", {}) or {}
         dd = int(counts.get("single", 0)) + int(counts.get("assemblage", 0))
         total = sum(int(v) for v in counts.values())
+        minutes = sum(int(n) * MINUTES_PER_STAGE.get(STAGE_OF_KIND[k], 0)
+                      for k, n in counts.items() if k in STAGE_OF_KIND)
         out.append({
             "device": did, "short": did[:8], "label": rec.get("label"),
             "last_ip": rec.get("last_ip"), "ips": rec.get("ips", []),
             "first_seen": rec.get("first_seen"), "last_seen": rec.get("last_seen"),
             "counts": counts, "total_runs": total, "dd_runs": dd,
-            "hours_saved": round(dd * MINUTES_PER_CHECKLIST / 60, 1),
+            "hours_saved": round(minutes / 60, 1),
         })
     out.sort(key=lambda r: r["last_seen"] or "", reverse=True)
     return out
@@ -1195,8 +1249,8 @@ def _run(job):
     try:
         _RUNNERS[job["kind"]](job)
         job["status"] = "done"
-        if job["kind"] in ("single", "assemblage"):
-            _bump_count()              # one completed DD checklist = MINUTES_PER_CHECKLIST saved
+        if job["kind"] in STAGE_OF_KIND:
+            _bump_count(job["kind"])   # one completed pipeline stage = its MINUTES_PER_STAGE saved
     except Exception as e:
         traceback.print_exc()
         job["status"] = "error"
