@@ -72,6 +72,15 @@ def _date(d):
     return d.strftime("%b %Y") if isinstance(d, (datetime.date, datetime.datetime)) else str(d)
 
 
+def _avg_unit_sf(deal):
+    mix = deal.get("unit_mix") or []
+    if mix:
+        total = sum(u["count"] for u in mix)
+        if total:
+            return sum(u["count"] * u["avg_sf"] for u in mix) / total
+    return deal.get("avg_unit_sf")
+
+
 # ─────────────────────────────────────────────────────────────────────────────────
 # Shared drawing primitives
 # ─────────────────────────────────────────────────────────────────────────────────
@@ -272,7 +281,7 @@ def _page1(c, deal):
         ("Dev. Type",        deal["dev_type"] or "—"),
         ("Product",          deal["product_type"] or "—"),
         ("# of Units",       f"{deal['n_units']} units" if deal['n_units'] else "—"),
-        ("Avg Unit Size",    f"{deal['avg_unit_sf']:,.0f} SF" if deal['avg_unit_sf'] else "—"),
+        ("Avg Unit Size",    f"{_avg_unit_sf(deal):,.0f} SF" if _avg_unit_sf(deal) else "—"),
         ("Lot Area",         (f"{deal['lot_sf']:,} SF / {deal['lot_acres']:.3f} ac"
                               if deal['lot_sf'] and deal['lot_acres'] else "—")),
         ("Density",          f"{deal['density']:.1f} units/ac" if deal['density'] else "—"),
@@ -370,12 +379,13 @@ def _page1(c, deal):
 
     _section_label(c, RX, y_r, "Leasing")
     y_r -= 12
-    _avg_rent = deal['leasing']['avg_rent']
-    _vel      = deal['leasing']['velocity_units']
+    _avg_rent  = deal['leasing']['avg_rent']
+    _vel       = deal['leasing']['velocity_units']
+    _stabilized = deal['status'].get('occupancy') == 1.0
     LEASING = [
         ("Avg Rent (Actual)",   f"${_avg_rent:,}/mo" if _avg_rent else "TBD"),
         ("Master Lessee",       deal['leasing']['master_lessee'] or "TBD"),
-        ("Lease-up Velocity",   f"{_vel} units/mo" if _vel else "TBD"),
+        *([("Lease-up Velocity", f"{_vel} units/mo" if _vel else "TBD")] if not _stabilized else []),
         ("Fully Stabilized",    _date(deal['schedule']['fully_stabilized'][1])),
     ]
     for key, val in LEASING:
@@ -723,12 +733,13 @@ def _page3(c, deal):
 
     _ar  = deal['leasing'].get('avg_rent')
     _vel = deal['leasing'].get('velocity_units')
+    _stabilized = deal['status'].get('occupancy') == 1.0
     LEASING_ITEMS = [
         ("Master Lessee",     deal['leasing'].get('master_lessee') or "TBD"),
         ("Avg Rent (Actual)", f"${_ar:,}/mo" if _ar else "TBD"),
         ("Occupancy",         _pct(deal['status']['occupancy'], 0)),
         ("Section 8 %",       _pct(deal['status']['sec8_pct'], 0)),
-        ("Lease-up Velocity", f"{_vel} units/mo" if _vel else "TBD"),
+        *([("Lease-up Velocity", f"{_vel} units/mo" if _vel else "TBD")] if not _stabilized else []),
         ("Fully Stabilized",  _date(deal['schedule']['fully_stabilized'][1])),
         ("Pre-leasing Date",  _date(deal['leasing'].get('pre_lease_date'))),
         ("First Move-Ins",    _date(deal['leasing'].get('first_move_ins'))),
@@ -932,7 +943,7 @@ AVALON = {
         "assessor_date":    None,
         "est_savings":      "TBD",
     },
-    "as_of": datetime.date(2024, 6, 7),
+    "as_of": datetime.date.today(),
 }
 
 
