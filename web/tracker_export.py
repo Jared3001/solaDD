@@ -294,7 +294,11 @@ def _apply(ws, row, colvals, key_set):
     kc = ws.cell(row, DEAL_KEY_COL)
     kc.value = ",".join(sorted(key_set)) if key_set else ""
     cells.append(kc)
-    ws.update_cells(cells, value_input_option="USER_ENTERED")
+    # RAW (not USER_ENTERED): a bare number typed into a percent-formatted cell
+    # gets scaled ÷100 by Sheets' value parser. The Tiebreaker column is
+    # percent-formatted and existing rows store the un-scaled score (e.g. 2.684
+    # displays as "268.40%"), so we must write values verbatim.
+    ws.update_cells(cells, value_input_option="RAW")
 
 
 def _ensure_key_header(ws):
