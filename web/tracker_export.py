@@ -57,7 +57,7 @@ DEAL_KEY_COL = 78          # column BZ — automation-owned dedup key (hidden)
 DEAL_KEY_HEADER = "Deal Key (auto — do not edit)"
 
 # Descriptive block: 1-based tracker column -> field name in the desc dict.
-# A=1 .. L=12.  Neighborhood (E) has no clean DD source today -> left blank.
+# A=1 .. L=12.  Neighborhood (E) is reverse-geocoded from the address.
 DESC_COLS = {
     1:  "project_name",
     2:  "units",
@@ -152,6 +152,64 @@ def _project_name(address):
         return address
 
 
+# Reverse-geocode endpoint for the colloquial neighborhood name. OSM returns
+# locality components; for LA the "suburb" field is the broad neighborhood the
+# tracker uses (e.g. "Echo Park", "Pico-Union"), with finer fallbacks after it.
+_NOMINATIM_REVERSE = "https://nominatim.openstreetmap.org/reverse"
+_NEIGHBORHOOD_KEYS = ("suburb", "neighbourhood", "quarter", "city_district",
+                      "residential", "borough")
+
+
+def _single_address(address):
+    """Reduce an assemblage address ('addr1; addr2; ... addrN, CITY, ST, ZIP')
+    to one geocodable address: the first parcel's street plus the shared
+    city/state/zip tail. A plain single address passes through unchanged."""
+    addr = str(address)
+    if ";" not in addr:
+        return addr
+    segs = addr.split(";")
+    first = segs[0].strip()
+    last = segs[-1].strip()
+    tail = last.split(",", 1)[1].strip() if "," in last else ""
+    return f"{first}, {tail}" if tail else first
+
+
+def _neighborhood(address):
+    """Best-effort neighborhood from a street address: forward-geocode to
+    lat/lon (reusing the pipeline's Census/OSM geocoder), then OSM reverse-
+    geocode and take the broadest locality component. Returns None on any
+    failure so the column is left blank rather than guessed."""
+    if not address:
+        return None
+    try:
+        import sys as _sys
+        src = str(ROOT / "build" / "sources")
+        if src not in _sys.path:
+            _sys.path.insert(0, src)
+        from geocoder import geocode
+        geo = geocode(_single_address(address))
+        lat, lon = geo.get("lat"), geo.get("lon")
+        if lat is None or lon is None:
+            return None
+        import urllib.parse
+        import urllib.request
+        q = urllib.parse.urlencode({"lat": lat, "lon": lon, "format": "json",
+                                    "zoom": 14, "addressdetails": 1})
+        req = urllib.request.Request(
+            f"{_NOMINATIM_REVERSE}?{q}",
+            headers={"User-Agent": "solaDD/1.0 (DD automation)"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            d = json.load(r)
+        addr = d.get("address", {}) if isinstance(d, dict) else {}
+        for key in _NEIGHBORHOOD_KEYS:
+            v = addr.get(key)
+            if v:
+                return str(v).strip()
+    except Exception:
+        return None
+    return None
+
+
 def _qct_dda(qct, dda):
     parts = []
     if str(qct or "").strip().lower() in _POSITIVE or "qct" in str(qct or "").lower():
@@ -176,7 +234,7 @@ def descriptive_from_dd(dd_path):
         "units":           g("estimated_unit_count"),
         "county":          g("county"),
         "city":            g("city_jurisdiction"),
-        "neighborhood":    None,   # no clean DD source yet
+        "neighborhood":    _neighborhood(address),   # reverse-geocoded from address
         "geographic_pool": g("geographic_pool"),
         "address":         address,
         "qct_dda":         _qct_dda(g("qct"), g("dda")),
