@@ -991,18 +991,60 @@ def _read_counts():
     return {"single": legacy} if legacy else {}
 
 
+def _write_counts(counts):
+    """Persist per-kind counts. Keeps a legacy `count` (DD total) for older readers
+    and preserves the one-time device-seed marker. Caller holds _counter_lock."""
+    dd = sum(counts.get(k, 0) for k, s in STAGE_OF_KIND.items() if s == "dd")
+    try:
+        seeded = bool(json.loads(COUNTER_FILE.read_text()).get("seeded_from_devices"))
+    except Exception:
+        seeded = False
+    try:
+        COUNTER_FILE.write_text(json.dumps(
+            {"counts": counts, "count": dd, "seeded_from_devices": seeded}))
+    except Exception:
+        traceback.print_exc()
+
+
 def _bump_count(kind):
-    """Record one completed run of `kind`. Also writes a legacy `count` (DD total)
-    so older code/readers still see a sensible DD number."""
+    """Record one completed run of `kind`."""
     with _counter_lock:
         counts = _read_counts()
         counts[kind] = counts.get(kind, 0) + 1
+        _write_counts(counts)
+        return counts
+
+
+def _seed_from_devices():
+    """One-time backfill of the non-DD pipeline stages.
+
+    The global counter historically tracked only DD runs, but the per-device tally
+    recorded every kind. Seed underwriting/comps/summary from that device history so
+    the banner credits work done before the tracker spanned the whole pipeline. DD is
+    left alone (its global count is authoritative and higher than the partial device
+    record). Uses max(global, device) per kind, so it's safe to run repeatedly."""
+    with _counter_lock:
+        try:
+            if json.loads(COUNTER_FILE.read_text()).get("seeded_from_devices"):
+                return
+        except Exception:
+            pass
+        counts = _read_counts()
+        dev = {}
+        for rec in _read_devices().values():
+            for k, v in (rec.get("counts") or {}).items():
+                dev[k] = dev.get(k, 0) + int(v)
+        for k, n in dev.items():
+            if STAGE_OF_KIND.get(k) in (None, "dd"):
+                continue                       # leave DD to the authoritative global count
+            if n > counts.get(k, 0):
+                counts[k] = n
         dd = sum(counts.get(k, 0) for k, s in STAGE_OF_KIND.items() if s == "dd")
         try:
-            COUNTER_FILE.write_text(json.dumps({"counts": counts, "count": dd}))
+            COUNTER_FILE.write_text(json.dumps(
+                {"counts": counts, "count": dd, "seeded_from_devices": True}))
         except Exception:
             traceback.print_exc()
-        return counts
 
 
 def stats():
@@ -1286,3 +1328,6 @@ def public_view(job):
 # Rehydrate prior completed runs from the volume so they're available immediately
 # (the Recent list + 'generate model' work right after a redeploy, not just after a run).
 _load_index()
+
+# One-time: backfill the non-DD pipeline stages from the per-device run history.
+_seed_from_devices()
