@@ -77,8 +77,8 @@ STAGE_OF_KIND = {
 # Minutes of manual analyst work each automated stage replaces (env-overridable).
 MINUTES_PER_STAGE = {
     "dd": MINUTES_PER_CHECKLIST,
-    "underwriting": int(os.environ.get("MINUTES_PER_UNDERWRITING", "120")),
-    "comps": int(os.environ.get("MINUTES_PER_COMPS", "90")),
+    "underwriting": int(os.environ.get("MINUTES_PER_UNDERWRITING", "15")),
+    "comps": int(os.environ.get("MINUTES_PER_COMPS", "25")),
     "summary": int(os.environ.get("MINUTES_PER_SUMMARY", "45")),
 }
 STAGE_ORDER = ["dd", "underwriting", "comps", "summary"]
