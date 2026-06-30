@@ -965,6 +965,27 @@ def run_comps_grid(job):
         subjects[b] = {"sf": s.get("sf"), "rent": s.get("rent"), "year": s.get("year"),
                        "baths": s.get("baths"), "city": s.get("city"), "m_or_l": "M",
                        "amenities": s.get("amenities", {}), "utilities": s.get("utilities", {})}
+    # Concluded (CTCAC-adjusted) rent per bed: median of each comp's adjusted rent
+    # (base + the ruleset's size/age/amenity/utility adjustments vs. the subject).
+    # This is what the non-LIHTC model should use — not the raw scraper median.
+    try:
+        import sys as _sys, statistics
+        _sys.path.insert(0, str(Path(__file__).parent.parent / "build" / "sources"))
+        import comp_adjust as _ca
+        concluded = {}
+        for b, payload in by_bed.items():
+            subj = subjects.get(b, {})
+            rents = [_ca.adjusted_rent(c["base_rent"], _ca.default_adjustments(subj, {
+                        "sf": c["unit_size_sf"], "rent": c["base_rent"], "year": c["year_built"],
+                        "baths": c["bathrooms"], "amenities": c["_amenities"], "utilities": c["_utilities"]}))
+                     for c in payload["comps"] if c.get("base_rent")]
+            if rents:
+                concluded[b] = int(round(statistics.median(rents)))
+        if concluded:
+            job["concluded_rents"] = concluded
+    except Exception:  # noqa: BLE001 — concluded rents are a best-effort enhancement
+        traceback.print_exc()
+
     # carry comp amenity/utility chars into the engine via the writer's ecomps map
     _orig = _comps.write_ctcac_grid
     out_path = RUN_DIR / f"{job['id']}.xlsx"
@@ -990,24 +1011,97 @@ def _norm_addr(s):
     return re.sub(r"[^a-z0-9]+", " ", s).strip()
 
 
+def deal_stages(dd_jid):
+    """The pipeline state of one DEAL (a DD run + its derived stages), for the
+    deal-workspace UI. Children are found in the live job store: the model by
+    `from_job == dd`, the summary by `from_job == model`, and rent comps by a
+    matching subject address (comps carry no from_job). Survives reloads since
+    it reads the same store the recent-runs list rehydrates."""
+    dd = get_job(dd_jid)
+    if not dd or dd.get("kind") not in ("single", "assemblage"):
+        raise ValueError("Not a due-diligence deal.")
+    addr = (dd.get("geo") or {}).get("matched_address") or dd.get("label")
+    akey = _norm_addr(addr)
+
+    with _lock:
+        all_jobs = list(_jobs.values())
+
+    def latest(pred):
+        cand = [j for j in all_jobs if pred(j)]
+        cand.sort(key=lambda j: j.get("finished") or j.get("started") or "", reverse=True)
+        return cand[0] if cand else None
+
+    def child_of(jid, kinds):
+        return latest(lambda j: j.get("kind") in kinds
+                      and (j.get("input") or {}).get("from_job") == jid)
+
+    model = child_of(dd_jid, ("underwrite", "lihtc_scenarios"))
+    summary = child_of(model["id"], ("pdf_summary",)) if model else None
+    comps = (latest(lambda j: j.get("kind") in ("comps", "comps_grid")
+                    and _norm_addr((j.get("geo") or {}).get("matched_address")) == akey)
+             if akey else None)
+
+    def stage(j, extra=None):
+        if not j:
+            return {"status": "none"}
+        out = {"id": j["id"], "kind": j.get("kind"), "status": j.get("status"),
+               "label": j.get("label"), "phase": j.get("phase"),
+               "downloadable": _downloadable(j), "filename": j.get("filename")}
+        if extra:
+            out.update(extra)
+        return out
+
+    m_extra = {}
+    if model and model.get("underwrite"):
+        uw = model["underwrite"]
+        m_extra = {"program": uw.get("program"), "deal_type": uw.get("deal_type"),
+                   "returns": uw.get("returns"), "models": uw.get("models")}
+    cm_extra = {}
+    if comps and comps.get("comps_data"):
+        cm_extra = {"beds": sorted(int(b) for b in comps["comps_data"].keys())}
+
+    return {
+        "dd": stage(dd, {"address": addr}),
+        "comps": stage(comps, cm_extra),
+        "model": stage(model, m_extra),
+        "summary": stage(summary),
+    }
+
+
 def latest_comp_rents(address):
-    """Median scraped market rent per bed from the most recent completed comps run
-    whose subject matches `address`. Feeds the non-LIHTC review form's rent defaults
-    straight from the AI comp scraper. Returns {rents_by_bed, counts, source_job,
-    address} or None when no matching comp run exists this session."""
+    """Best market rent per bed for `address`, for the non-LIHTC model's rent
+    defaults. Prefers an EDITED comp grid's CTCAC-ADJUSTED concluded rents
+    (kind=comps_grid, `concluded_rents`) over the raw scraper median
+    (kind=comps, median of `comps_data` base rents). Returns {rents_by_bed,
+    counts, source, source_job, address} or None when no match exists."""
     import statistics
     key = _norm_addr(address)
     if not key:
         return None
+
+    def matches(j, kind):
+        return (j.get("kind") == kind and j.get("status") == "done"
+                and _norm_addr((j.get("geo") or {}).get("matched_address")) == key)
+
     with _lock:
-        runs = [j for j in _jobs.values()
-                if j.get("kind") == "comps" and j.get("status") == "done"
-                and j.get("comps_data")
-                and _norm_addr((j.get("geo") or {}).get("matched_address")) == key]
-    if not runs:
+        grids = [j for j in _jobs.values() if matches(j, "comps_grid") and j.get("concluded_rents")]
+        scrapes = [j for j in _jobs.values() if matches(j, "comps") and j.get("comps_data")]
+
+    # 1) CTCAC-adjusted concluded rents from the most recent edited grid.
+    if grids:
+        grids.sort(key=lambda j: j.get("finished") or "", reverse=True)
+        job = grids[0]
+        rents = {int(b): int(round(v)) for b, v in job["concluded_rents"].items()}
+        if rents:
+            return {"rents_by_bed": rents, "counts": {}, "source": "ctcac_adjusted",
+                    "source_job": job["id"],
+                    "address": (job.get("geo") or {}).get("matched_address")}
+
+    # 2) Fallback: raw scraper median.
+    if not scrapes:
         return None
-    runs.sort(key=lambda j: j.get("finished") or "", reverse=True)
-    job = runs[0]
+    scrapes.sort(key=lambda j: j.get("finished") or "", reverse=True)
+    job = scrapes[0]
     rents, counts = {}, {}
     for b, rows in job["comps_data"].items():
         vals = [c.get("base_rent") for c in rows
@@ -1017,7 +1111,8 @@ def latest_comp_rents(address):
             counts[int(b)] = len(vals)
     if not rents:
         return None
-    return {"rents_by_bed": rents, "counts": counts, "source_job": job["id"],
+    return {"rents_by_bed": rents, "counts": counts, "source": "scraper_median",
+            "source_job": job["id"],
             "address": (job.get("geo") or {}).get("matched_address")}
 
 

@@ -12,33 +12,37 @@ let lastScnJob = null;      // most recent completed scenario job, for "Generate
 
 const $ = sel => document.querySelector(sel);
 
-// ---------- tab switching ----------
-document.querySelectorAll(".tab").forEach(tab => {
-  tab.addEventListener("click", () => {
-    mode = tab.dataset.mode;
-    document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t === tab));
-    const isSources = mode === "sources";
-    // Sources is a reference view — swap the run UI for the catalog.
+// ---------- view nav (New deal / Sources) ----------
+document.querySelectorAll(".vnav").forEach(b => {
+  b.addEventListener("click", () => {
+    const isSources = b.dataset.view === "sources";
+    document.querySelectorAll(".vnav").forEach(x => x.classList.toggle("active", x === b));
     $("#run-form").classList.toggle("hidden", isSources);
+    document.querySelector(".adv").classList.toggle("hidden", isSources);
     $("#run-extras").classList.toggle("hidden", isSources);
     $("#sources-panel").classList.toggle("hidden", !isSources);
-    if (!isSources) {
-      document.querySelectorAll("[data-for]").forEach(f => {
-        f.classList.toggle("hidden", f.dataset.for !== mode);
-      });
-      $("#run-btn").textContent = mode === "underwrite" ? "Generate model"
-        : mode === "comps" ? "Find rent comps" : "Run feasibility";
-    }
   });
 });
 
-// ---------- run ----------
-$("#run-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  showError(null);
+// Toggle APN entry within the New-deal intake (an assemblage runs by parcel number).
+$("#use-apns").addEventListener("change", (e) => {
+  $("#apn-wrap").classList.toggle("hidden", !e.target.checked);
+});
 
+// ---------- run ----------
+$("#run-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  runMode($("#use-apns").checked ? "assemblage" : "single");
+});
+$("#adv-model").addEventListener("click", () => runMode("underwrite"));
+$("#adv-comps").addEventListener("click", () => runMode("comps"));
+
+// Build the payload for a run mode and launch it. Single/assemblage start a deal;
+// underwrite/comps are the "Other tools" shortcuts.
+async function runMode(m) {
+  showError(null);
   let fetchOpts;
-  if (mode === "underwrite") {
+  if (m === "underwrite") {
     const ddFile = $("#dd").files[0] || null;
     if (!ddFile) { showError("Upload a completed DD checklist (.xlsx)."); return; }
     const fd = new FormData();
@@ -46,19 +50,22 @@ $("#run-form").addEventListener("submit", async (e) => {
     fd.append("dd", ddFile);
     fd.append("name", $("#uw-name").value.trim());
     fetchOpts = { method: "POST", body: fd };
-  } else if (mode === "comps") {
+  } else if (m === "comps") {
     const address = $("#comp-address").value.trim();
     if (!address) { showError("Enter the subject address to find rent comps."); return; }
     const beds = [...document.querySelectorAll(".comp-bed:checked")].map(c => Number(c.value));
     if (!beds.length) { showError("Pick at least one bed type."); return; }
     fetchOpts = { method: "POST", headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ mode: "comps", address, beds }) };
+  } else if (m === "assemblage") {
+    const apns = $("#apns").value.trim();
+    if (!apns) { showError("Enter at least one APN, or uncheck APN entry."); return; }
+    fetchOpts = { method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ mode: "assemblage", apns }) };
   } else {
-    const omFile = mode === "single" ? ($("#om").files[0] || null) : null;
-    const address = mode === "single" ? $("#address").value.trim() : "";
-    if (mode === "single" && !address && !omFile) {
-      showError("Enter an address or upload an OM."); return;
-    }
+    const omFile = $("#om").files[0] || null;
+    const address = $("#address").value.trim();
+    if (!address && !omFile) { showError("Enter an address or upload an OM."); return; }
     if (omFile) {
       const fd = new FormData();
       fd.append("mode", "single");
@@ -66,15 +73,12 @@ $("#run-form").addEventListener("submit", async (e) => {
       fd.append("om", omFile);
       fetchOpts = { method: "POST", body: fd };           // browser sets multipart boundary
     } else {
-      const body = { mode };
-      if (mode === "single") body.address = address;
-      else body.apns = $("#apns").value;
-      fetchOpts = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+      fetchOpts = { method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ mode: "single", address }) };
     }
   }
-
   await launch(fetchOpts);
-});
+}
 
 // POST a run request and start polling. Shared by the form + the chain button.
 async function launch(fetchOpts) {
@@ -125,6 +129,9 @@ $("#gen-pdf").addEventListener("click", async () => {
 
 // "→ Financial model" / "→ Rent comps" next to any previously completed checklist in Recent runs.
 $("#recent-body").addEventListener("click", (e) => {
+  const openBtn = e.target.closest(".rc-open");
+  if (openBtn && openBtn.dataset.job) { DealWorkspace.open(openBtn.dataset.job); return; }
+  // Back-compat: the inline chain buttons (if any remain) still work.
   const btn = e.target.closest(".rc-gen");
   if (btn && btn.dataset.job) genModelFrom(btn.dataset.job);
   const compsBtn = e.target.closest(".rc-comps");
@@ -181,6 +188,146 @@ $("#cpf-go").addEventListener("click", () => {
   launch({ method: "POST", headers: { "Content-Type": "application/json" },
            body: JSON.stringify({ mode: "comps", address: addr, beds }) });
 });
+
+// ---------- Deal workspace (pipeline stepper) ----------
+// One screen per deal: DD → rent comps → financial model → one-pager, each stage
+// showing its status, action, and the hand-off to the next. Reads /api/deal/<dd>
+// (the live job store) so it survives reloads. Reuses the existing chain actions.
+let _activeDealId = null;
+
+const DealWorkspace = {
+  async open(ddJobId) {
+    _activeDealId = ddJobId;
+    try {
+      const res = await fetch(`/api/deal/${ddJobId}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Couldn't load this deal.");
+      this.render(data);
+      const p = $("#deal-workspace");
+      p.classList.remove("hidden");
+      p.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (err) { showError(err.message); }
+  },
+  async refresh() { if (_activeDealId) await this.open(_activeDealId); },
+  close() { _activeDealId = null; $("#deal-workspace").classList.add("hidden"); },
+
+  render(d) {
+    const dd = d.dd || {}, comps = d.comps || {}, model = d.model || {}, summary = d.summary || {};
+    const addr = (dd.address || dd.label || "Deal").replace(/\s*—.*$/, "");
+    $("#dw-title").textContent = addr;
+    $("#dw-meta").textContent = dd.label || "";
+
+    const html = [];
+    html.push(stageRow(1, {
+      state: "done", name: "Due diligence", sub: "Site readers complete",
+      actions: dd.downloadable ? [dlBtn(dd.id, "Checklist .xlsx")] : [],
+    }, "passes site facts → county, PHA, QCT/DDA, resource, lot SF"));
+
+    const cState = jobState(comps);
+    html.push(stageRow(2, {
+      state: cState || "ready", name: "Rent comps",
+      sub: cState === "done" ? `Comp grid ready${comps.beds ? " · beds " + comps.beds.join("/") : ""}`
+        : "Zillow scrape, then a CTCAC grid you confirm",
+      actions: [
+        actBtn(`DealWorkspace.runComps('${dd.id}')`, cState === "done" ? "Re-run comps" : "Run rent comps", cState !== "done"),
+        ...(comps.downloadable ? [dlBtn(comps.id, "Grid .xlsx")] : []),
+      ],
+    }, "passes adjusted market rents → pre-fills the model"));
+
+    const mState = jobState(model);
+    const compsDone = jobState(comps) === "done";
+    const mActions = [actBtn(`DealWorkspace.buildModel('${dd.id}')`,
+      mState === "done" ? "Rebuild model" : "Review inputs, then build", mState !== "done")];
+    if (model.downloadable) mActions.push(dlBtn(model.id, "Model .zip"));
+    html.push(stageRow(3, {
+      state: mState || "ready", name: "Financial model",
+      sub: mState === "done" ? modelSummary(model)
+        : compsDone ? "LIHTC, or non-LIHTC market / mixed-income / debt stack"
+        : "LIHTC, or non-LIHTC. For a market or mixed-income deal, run rent comps first — the concluded rents pre-fill it.",
+      actions: mActions, returns: mState === "done" ? returnsLine(model) : "",
+    }, "passes returns and deal facts → the one-pager"));
+
+    const sState = jobState(summary);
+    const modelDone = mState === "done";
+    const fromScenarios = model.kind === "lihtc_scenarios";
+    let s4;
+    if (sState === "done" || sState === "running" || sState === "error") {
+      s4 = { state: sState, name: "One-pager", sub: "3-page investment PDF",
+             actions: summary.downloadable ? [dlBtn(summary.id, "One-pager .pdf")] : [] };
+    } else if (modelDone && fromScenarios) {
+      s4 = { state: "ready", name: "One-pager", sub: "3-page investment PDF — KPIs, returns, debt, comps",
+             actions: [actBtn(`DealWorkspace.buildSummary('${model.id}')`, "Generate one-pager", false)] };
+    } else if (modelDone) {
+      s4 = { state: "locked", name: "One-pager", muted: true,
+             sub: "Available from a LIHTC scenario set — build scenarios in step 3" };
+    } else {
+      s4 = { state: "locked", name: "One-pager", muted: true, sub: "Build a model first" };
+    }
+    html.push(stageRow(4, s4, null, true));
+
+    $("#dw-stages").innerHTML = html.join("");
+  },
+
+  runComps(ddId) { genCompsFrom(ddId, _activeDealId === ddId ? ($("#dw-title").textContent || "") : ""); },
+  buildModel(ddId) { genModelFrom(ddId); },
+  buildSummary(modelId) { genSummaryFrom(modelId); },
+};
+window.DealWorkspace = DealWorkspace;
+$("#dw-close").addEventListener("click", () => DealWorkspace.close());
+
+function jobState(s) {
+  const v = s && s.status;
+  if (v === "done") return "done";
+  if (v === "running") return "running";
+  if (v === "error") return "error";
+  return null;
+}
+function dlBtn(id, label) { return `<a class="download-btn" href="/api/download/${esc(id)}">${esc(label)}</a>`; }
+function actBtn(call, label, primary) {
+  return `<button type="button" class="download-btn${primary ? "" : " ghost"}" onclick="${call}">${esc(label)}</button>`;
+}
+function modelSummary(m) {
+  if (m.deal_type === "nonlihtc") return `Non-LIHTC · ${m.program || "market"}`;
+  if (m.kind === "lihtc_scenarios") return `LIHTC scenario set${(m.models || []).length ? " · " + m.models.length + " models" : ""}`;
+  return "LIHTC v28 · Modular + Stick";
+}
+function returnsLine(m) {
+  const r = m.returns || {};
+  const irr = r["Levered IRR"], noi = r["Net Operating Income"];
+  if (irr == null && noi == null) return "";
+  const parts = [];
+  if (irr != null) parts.push(`Levered IRR ${(Number(irr) * 100).toFixed(1)}%`);
+  if (noi != null) parts.push(`NOI $${fmt(Math.round(noi))}`);
+  return parts.join(" · ");
+}
+// Render one stage row: status rail (circle + connector) + body (name, pill, sub, actions).
+function stageRow(n, o, handoff, isLast) {
+  const st = o.state || "ready";
+  const PILL = { done: ["done", "Done"], ready: ["ready", "Ready"], running: ["run", "Running…"],
+                 error: ["err", "Error"], locked: ["lock", o.muted && o.sub && o.sub.indexOf("scenario") >= 0 ? "From scenarios" : "Locked"] };
+  const inner = st === "done" ? "✓" : st === "running" ? "…" : st === "error" ? "!" : String(n);
+  const circleCls = st === "done" ? "done" : st === "running" ? "run" : st === "error" ? "err"
+    : st === "locked" ? "lock" : "ready";
+  const [pillCls, pillTxt] = PILL[st] || PILL.ready;
+  const acts = (o.actions || []).join("");
+  return `
+    <div class="dw-stage">
+      <div class="dw-rail"><div class="dw-circle ${circleCls}">${inner}</div>${isLast ? "" : `<div class="dw-line"></div>`}</div>
+      <div class="dw-body">
+        <div class="dw-titlerow"><span class="dw-name${o.muted ? " muted" : ""}">${esc(o.name)}</span><span class="dw-pill ${pillCls}">${esc(pillTxt)}</span></div>
+        <div class="dw-sub${o.muted ? " muted" : ""}">${esc(o.sub || "")}</div>
+        ${o.returns ? `<div class="dw-returns">${esc(o.returns)}</div>` : ""}
+        ${acts ? `<div class="dw-actions">${acts}</div>` : ""}
+      </div>
+    </div>
+    ${isLast || !handoff ? "" : `<div class="dw-handoff"><span>↓</span><span>${esc(handoff)}</span></div>`}`;
+}
+// Launch the one-pager from a LIHTC scenario job, then return to the workspace.
+async function genSummaryFrom(modelJobId) {
+  showError(null);
+  await launch({ method: "POST", headers: { "Content-Type": "application/json" },
+                 body: JSON.stringify({ mode: "pdf_summary", from_job: modelJobId }) });
+}
 
 // Holds the current model-review context so the deal-type toggle can re-render
 // either review form against the same DD intake.
@@ -256,12 +403,13 @@ function openNonLihtcReview(jobId, intake) {
   // ran comps for this subject. Keys are bed ints (0=studio,1,2,3).
   const cr = (intake.comp_rents && intake.comp_rents.rents_by_bed) || {};
   const counts = (intake.comp_rents && intake.comp_rents.counts) || {};
+  const ctcac = intake.comp_rents && intake.comp_rents.source === "ctcac_adjusted";
   const rentOf = (bed) => (cr[bed] != null ? Number(cr[bed]) : null);
-  const compHelp = (bed) => (counts[bed]
-    ? `auto-filled: median of ${counts[bed]} comp${counts[bed] > 1 ? "s" : ""} from the AI scraper`
+  const compHelp = (bed) => (ctcac ? "CTCAC-adjusted concluded rent from your comp grid"
+    : counts[bed] ? `auto-filled: median of ${counts[bed]} comp${counts[bed] > 1 ? "s" : ""} from the AI scraper`
     : "from comp scraper");
   const compNote = intake.comp_rents
-    ? `Rents pre-filled from your comp run on ${intake.comp_rents.address || "this subject"} (median $/mo per bed) — edit as needed. `
+    ? `Rents pre-filled from your ${ctcac ? "edited comp grid (CTCAC-adjusted concluded rents)" : "comp run (scraper median)"} on ${intake.comp_rents.address || "this subject"} — edit as needed. `
     : "";
   ReviewEditor.open({
     subtitle: `${intake.label} — non-LIHTC (market) model. ${intake.comp_rents ? "Rents pre-filled from the comp scraper; c" : "Enter the unit program and market rents (from the comp scraper). C"}onfirm the unit program. The pre-v28 ModularZ engine runs in market mode.`,
@@ -1015,25 +1163,30 @@ function render(job) {
     dl.classList.remove("hidden");
   }
 
-  // Offer "Generate financial model" and "→ Rent comps" once a DD run is downloadable.
+  // Track the latest DD / scenario job for chaining. The per-stage actions now
+  // live in the deal workspace (opened below), so the loose status-panel buttons
+  // stay hidden — kept in the DOM only as a fallback.
   const isDD = job.kind === "single" || job.kind === "assemblage";
   if (isDD && job.downloadable) {
     lastDDJob = job.id;
     lastDDAddress = job.geo ? job.geo.matched_address : "";
-    $("#gen-model").classList.remove("hidden");
-    $("#gen-comps").classList.remove("hidden");
   }
-
-  // Offer "Generate PDF summary" once a scenario job is downloadable.
   if (job.kind === "lihtc_scenarios" && job.downloadable) {
     lastScnJob = job.id;
-    $("#gen-pdf").classList.remove("hidden");
   }
 
   if (job.parcels) renderParcels(job);
   if (job.om) renderOM(job.om);
   if (job.underwrite) renderUnderwrite(job.underwrite);
   renderFields(job.fields || []);
+
+  // Deal workspace: a finished DD opens its workspace; a finished downstream
+  // stage refreshes the workspace already on screen.
+  if (isDD && job.downloadable) {
+    DealWorkspace.open(job.id);
+  } else if (_activeDealId && ["comps", "comps_grid", "underwrite", "lihtc_scenarios", "pdf_summary"].includes(job.kind)) {
+    DealWorkspace.refresh();
+  }
 }
 
 function renderUnderwrite(uw) {
@@ -1295,8 +1448,7 @@ async function loadRecent() {
         <td>${run.fields}${run.flags ? ` <span class="rc-flag" title="${run.flags} field(s) need manual verification">⚑ ${run.flags}</span>` : ""}</td>
         <td class="rc-when">${esc(fmtWhen(run.finished))}</td>
         <td class="rc-actions">
-          ${run.can_model ? `<button class="rc-gen" type="button" data-job="${esc(run.id)}" title="Build LIHTC v28 model from this checklist">→ Financial model</button>` : ""}
-          ${run.can_comps ? `<button class="rc-comps" type="button" data-job="${esc(run.id)}" data-addr="${esc(run.label)}" title="Collect rent comps for this site">→ Rent comps</button>` : ""}
+          ${run.can_model ? `<button class="rc-open" type="button" data-job="${esc(run.id)}" title="Open this deal's pipeline">Open deal →</button>` : ""}
           ${run.downloadable ? `<a class="rc-dl" href="/api/download/${run.id}">Download</a>` : ""}
         </td>
       </tr>`).join("");

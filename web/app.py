@@ -464,6 +464,16 @@ def api_job(jid):
     return jsonify(jobs.public_view(job))
 
 
+@app.get("/api/deal/<jid>")
+@login_required
+def api_deal(jid):
+    """Pipeline state of one deal (DD + comps + model + one-pager) for the workspace."""
+    try:
+        return jsonify(jobs.deal_stages(jid))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
 @app.get("/api/download/<jid>")
 @login_required
 def api_download(jid):

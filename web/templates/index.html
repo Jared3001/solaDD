@@ -36,63 +36,72 @@
       </div>
     </section>
 
-    <section class="panel">
-      <div class="tabs" role="tablist">
-        <button class="tab active" data-mode="single" role="tab">Single address</button>
-        <button class="tab" data-mode="assemblage" role="tab">Block assemblage (APNs)</button>
-        <button class="tab" data-mode="underwrite" role="tab">Financial model</button>
-        <button class="tab" data-mode="comps" role="tab">Rent comps</button>
-        <button class="tab" data-mode="sources" role="tab">Sources</button>
+    <section class="panel" id="intake-panel">
+      <div class="viewnav" role="tablist">
+        <button class="vnav active" data-view="deal" type="button" role="tab">New deal</button>
+        <button class="vnav" data-view="sources" type="button" role="tab">Sources</button>
       </div>
 
       <form id="run-form">
-        <div class="field" data-for="single">
-          <label for="address">Property address</label>
-          <input type="text" id="address" name="address"
-                 placeholder="11300 S Main St, Los Angeles, CA 90061" autocomplete="off">
-          <p class="hint">Any California address. Runs ~40 automated readers (~10s). City of LA (ZIMAS), unincorporated LA County (County DRP), and City of San Diego parcels also get the full local zoning/hazard block; other incorporated cities route to manual. <strong>Multi-parcel site?</strong> Enter several addresses separated by <code>;</code> to run them as one assemblage — land area is summed and every APN listed (the address-based alternative to the APN tab).</p>
+        <label for="address">Property address</label>
+        <input type="text" id="address" name="address"
+               placeholder="11300 S Main St, Los Angeles, CA 90061" autocomplete="off">
+        <p class="hint">Any California address — runs ~40 automated readers (~10s). City of LA, unincorporated LA County, and City of San Diego get the full local zoning/hazard block. Multiple parcels? Separate addresses with <code>;</code> to run them as one assemblage, or switch to APN entry.</p>
 
-          <label for="om" class="om-label">Offering Memorandum <span class="om-opt">(optional PDF)</span></label>
-          <input type="file" id="om" name="om" accept="application/pdf,.pdf">
-          <p class="hint">Drop the OM to auto-fill deal facts (price, land size, unit/tenant mix…). Gemini reads the PDF; values default to the OM and switch to a DD answer only when our process finds a different, cited value. Leave the address blank to pull it from the OM.</p>
-        </div>
-
-        <div class="field hidden" data-for="assemblage">
-          <label for="apns">APN list</label>
-          <textarea id="apns" name="apns" rows="4"
+        <label class="toggle-row"><input type="checkbox" id="use-apns"> Enter parcel numbers (APNs) instead</label>
+        <div id="apn-wrap" class="hidden">
+          <textarea id="apns" name="apns" rows="3"
                     placeholder="5082-024-018&#10;5082-024-019&#10;5082-024-020"></textarea>
-          <p class="hint">One APN per line (or comma-separated). LA City or San Diego County parcels (auto-detected). Sums combined land area and aggregates every designation across the block (~18s).</p>
+          <p class="hint">One APN per line (or comma-separated). LA City or San Diego County parcels, auto-detected. Sums combined land area and aggregates every designation across the block.</p>
         </div>
 
-        <div class="field hidden" data-for="underwrite">
-          <label for="dd">DD checklist</label>
-          <input type="file" id="dd" name="dd" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
-          <p class="hint">Upload a completed DD checklist (.xlsx) → the <strong>LIHTC v28 model</strong> (default), computed and ready to open, plus the legacy <strong>Stick + Modular</strong> pro-formas — bundled as a .zip with macros &amp; formulas preserved. Residential stories defaults to 5 and NRSF flows from the model; land defaults to $150/SF (or the OM price) — all overridable on the review step. Or run a DD in the other tabs and click <strong>Generate financial model</strong> on the result — no re-upload.</p>
-
-          <label for="uw-name" class="om-label">Deal name <span class="om-opt">(optional)</span></label>
-          <input type="text" id="uw-name" name="name" placeholder="defaults to the site address" autocomplete="off">
-        </div>
-
-        <div class="field hidden" data-for="comps">
-          <label for="comp-address">Subject address</label>
-          <input type="text" id="comp-address" name="comp-address"
-                 placeholder="17719 Kinzie St, Northridge, CA 91325" autocomplete="off">
-          <p class="hint">Scrapes Zillow via Firecrawl + Gemini to shortlist nearby rental comps, then opens an editable <strong>rent-comparability grid</strong> (CTCAC / HUD-92273 style). Confirm which comps to keep and set each one's characteristics (unit size, year, bathrooms, amenities, utilities paid by tenant); adjustment $ compute live from the SoLa ruleset, then export the formatted CTCAC grid.</p>
-          <label class="om-label">Bed types</label>
-          <div class="comp-beds">
-            <label><input type="checkbox" class="comp-bed" value="0" checked> Studio</label>
-            <label><input type="checkbox" class="comp-bed" value="1" checked> 1BR</label>
-            <label><input type="checkbox" class="comp-bed" value="2" checked> 2BR</label>
-            <label><input type="checkbox" class="comp-bed" value="3"> 3BR</label>
-          </div>
-        </div>
+        <label for="om" class="om-label">Offering Memorandum <span class="om-opt">(optional PDF)</span></label>
+        <input type="file" id="om" name="om" accept="application/pdf,.pdf">
+        <p class="hint">Drop the OM to auto-fill deal facts (price, land size, unit/tenant mix…). Values default to the OM and switch to a DD answer only on a different cited value. Leave the address blank to pull it from the OM.</p>
 
         <button type="submit" id="run-btn" class="run-btn">Run feasibility</button>
         <p id="form-error" class="error-banner hidden"></p>
       </form>
+
+      <details class="adv">
+        <summary>Other tools</summary>
+        <div class="adv-body">
+          <div class="adv-tool">
+            <label for="dd">Build a model from a completed DD checklist</label>
+            <input type="file" id="dd" name="dd" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+            <input type="text" id="uw-name" name="name" placeholder="Deal name (optional)" autocomplete="off">
+            <p class="hint">LIHTC v28 (default) + legacy Stick + Modular, as a .zip — review step lets you switch to non-LIHTC. Usually you'd run a DD above and use the deal's pipeline instead.</p>
+            <button type="button" id="adv-model" class="download-btn ghost">Generate model →</button>
+          </div>
+          <div class="adv-tool">
+            <label for="comp-address">Rent comps for an address</label>
+            <input type="text" id="comp-address" name="comp-address"
+                   placeholder="17719 Kinzie St, Northridge, CA 91325" autocomplete="off">
+            <div class="comp-beds">
+              <label><input type="checkbox" class="comp-bed" value="0" checked> Studio</label>
+              <label><input type="checkbox" class="comp-bed" value="1" checked> 1BR</label>
+              <label><input type="checkbox" class="comp-bed" value="2" checked> 2BR</label>
+              <label><input type="checkbox" class="comp-bed" value="3"> 3BR</label>
+            </div>
+            <p class="hint">Zillow scrape → editable CTCAC / HUD-92273 grid. Standalone; within a deal, run comps from its pipeline.</p>
+            <button type="button" id="adv-comps" class="download-btn ghost">Find comps →</button>
+          </div>
+        </div>
+      </details>
     </section>
 
     <div id="run-extras">
+      <section id="deal-workspace" class="panel hidden">
+        <div class="dw-head">
+          <div>
+            <h2 class="recent-head" id="dw-title">Deal</h2>
+            <p class="hint" id="dw-meta"></p>
+          </div>
+          <button id="dw-close" class="download-btn ghost" type="button">← All deals</button>
+        </div>
+        <div id="dw-stages"></div>
+      </section>
+
       <section id="status-panel" class="panel hidden">
         <div class="status-head">
           <div>
@@ -217,8 +226,8 @@
       <section id="results" class="results"></section>
 
       <section id="recent-panel" class="panel hidden">
-        <h2 class="recent-head">Completed checklists</h2>
-        <p class="hint">Re-download a finished checklist, click <strong>→ Financial model</strong> to build the LIHTC v28 model straight from it, or click <strong>→ Rent comps</strong> to collect a CTCAC-style rent-comp grid for the site. Persists across redeploys.</p>
+        <h2 class="recent-head">Your deals</h2>
+        <p class="hint">Click <strong>Open deal →</strong> to reopen a deal's pipeline — due diligence, rent comps, financial model, and one-pager — or re-download its checklist. Persists across redeploys.</p>
         <table class="recent-table">
           <thead><tr><th>Site</th><th>Type</th><th>Fields</th><th>When</th><th></th></tr></thead>
           <tbody id="recent-body"></tbody>
