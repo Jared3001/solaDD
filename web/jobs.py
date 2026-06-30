@@ -1452,13 +1452,20 @@ def recent_jobs(n=12):
     """Most recent completed DEALS (a DD run), newest first — the 'Your deals'
     list. Only due-diligence runs appear; their downstream outputs (rent comps,
     financial models, scenario sets, one-pagers) live inside the deal's workspace,
-    not as separate rows."""
+    not as separate rows. Deduped by site: only the latest DD run per address."""
     with _lock:
         done = [j for j in _jobs.values()
                 if j.get("status") == "done" and j.get("kind") in ("single", "assemblage")]
     done.sort(key=lambda j: j.get("finished") or "", reverse=True)
-    out = []
-    for j in done[:n]:
+    out, seen = [], set()
+    for j in done:
+        if len(out) >= n:
+            break
+        key = _norm_addr((j.get("geo") or {}).get("matched_address") or j.get("label"))
+        if key and key in seen:
+            continue  # an older DD run of the same site — keep only the latest
+        if key:
+            seen.add(key)
         nfields, nflags = _job_counts(j)
         out.append({
             "id": j["id"], "kind": j["kind"], "label": j.get("label") or j["id"],
