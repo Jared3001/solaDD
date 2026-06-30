@@ -40,6 +40,7 @@ SH_DASH = "Dashboard"
 SH_BUDGET = "(Z+) Dev Budget"
 SH_OPEX = "(Z+) OpEx"
 SH_RENT = "(Z+) Rent Roll"
+SH_FIN = "(Z+) Financing"
 
 # Share the LIHTC engine's process cap so both engines together never OOM Railway.
 _RECALC_SEM = threading.Semaphore(2)
@@ -179,6 +180,16 @@ INPUT_CELLS = {
     "perm_dscr":        (SH_DASH,   "K13", False),
     "hold_months":      (SH_DASH,   "W20", False),
     "rent_growth":      (SH_DASH,   "W21", False),
+    # --- debt stack: senior perm sizing knobs + subordinate (soft/gap) loan
+    # (subordinate rows 106-109 + D43:D45 added by build_mixedincome_template.py)
+    "perm_min_dscr":    (SH_FIN,    "H11", False),  # senior sized by MIN(DSCR,LTV,LTC)
+    "perm_max_ltv":     (SH_FIN,    "H14", False),
+    "perm_max_ltc":     (SH_FIN,    "H16", False),
+    "perm_amort":       (SH_FIN,    "H21", False),
+    "perm_proceeds":    (SH_FIN,    "H19", False),  # override = fixed senior $ amount
+    "sub_amount":       (SH_FIN,    "D43", False),  # subordinate loan $ (0 = none)
+    "sub_rate":         (SH_FIN,    "D44", False),
+    "sub_amort":        (SH_FIN,    "D45", False),  # years; 0 = interest-only/deferred
 }
 
 # Always applied for a non-LIHTC deal: zero BOTH affordable-allocation systems.
@@ -209,10 +220,14 @@ HEADLINE = {
 # --------------------------------------------------------------------------
 # assemble friendly inputs -> {(sheet, addr): (value, is_text)}
 # --------------------------------------------------------------------------
-def split_inputs(friendly: dict) -> dict:
+def split_inputs(friendly: dict, market_mode: bool = True) -> dict:
     """Map a friendly-name dict to {(sheet, addr): (value, is_text)}, plus the
-    fixed market-mode neutralisers. Unknown names raise (typo guard)."""
-    cells = dict(_MARKET_MODE_CELLS)
+    fixed market-mode neutralisers. Unknown names raise (typo guard).
+
+    market_mode=True zeroes BOTH affordable systems (pure-market deals). Set
+    False for mixed-income builds that drive the restricted rent-roll rows
+    directly (build_mixed_income_inputs supplies its own neutralisers)."""
+    cells = dict(_MARKET_MODE_CELLS) if market_mode else {}
     for name, val in (friendly or {}).items():
         if name not in INPUT_CELLS:
             raise KeyError(f"unknown non-LIHTC input {name!r}")
@@ -278,10 +293,13 @@ def recalc(friendly: dict = None, cells: dict = None, read=None, timeout=120):
             shutil.rmtree(profile, ignore_errors=True)
 
 
-def build_download(friendly: dict, tolerant: bool = False) -> bytes:
+def build_download(friendly: dict = None, tolerant: bool = False,
+                   cells: dict = None) -> bytes:
     """Return a patched .xlsx (formulas intact, fullCalcOnLoad=1 so Excel recalcs
-    on open). For the analyst-facing downloadable model."""
-    cells = split_inputs(friendly)
+    on open). For the analyst-facing downloadable model. Pass either `friendly`
+    (market mode) or a pre-split `cells` dict (e.g. mixed-income)."""
+    if cells is None:
+        cells = split_inputs(friendly)
     by_sheet: dict[str, dict] = {}
     for (sheet, addr), (val, is_text) in cells.items():
         by_sheet.setdefault(sheet, {})[addr] = (val, is_text)
@@ -345,9 +363,54 @@ def _bed_lookup(d: dict, bed: int, default=0):
     return default
 
 
+def loans_to_friendly(loans: list):
+    """Map an ordered loan stack to engine inputs + a summary.
+
+    loans[0] = SENIOR perm (sized in-model by MIN(DSCR,LTV,LTC); basis picks the
+    binding constraint, or basis='fixed' overrides the proceeds). loans[1] =
+    SUBORDINATE soft/gap loan (a fixed $ amount with rate + amort; amort 0 =
+    interest-only/deferred). Each loan: {label, basis, value, rate, amort, io}.
+    Only the senior + ONE subordinate flow through the workbook's Monthly CF
+    (Levered IRR & Equity Multiple). 3rd+ tranches are returned in the summary
+    but NOT modelled (no workbook slot) — caller should surface that.
+    """
+    friendly, summary, unmodelled = {}, [], []
+    for i, ln in enumerate(loans or []):
+        basis = (ln.get("basis") or "").lower()
+        val, rate = ln.get("value"), ln.get("rate")
+        amort = 0 if ln.get("io") else (ln.get("amort") or 0)
+        if i == 0:  # senior
+            if rate is not None:
+                friendly["perm_rate"] = rate
+            if amort:
+                friendly["perm_amort"] = amort
+            if val is not None:
+                if basis == "dscr":
+                    friendly["perm_min_dscr"] = val
+                elif basis == "ltv":
+                    friendly["perm_max_ltv"] = val
+                elif basis == "ltc":
+                    friendly["perm_max_ltc"] = val
+                elif basis == "fixed":
+                    friendly["perm_proceeds"] = val
+            summary.append({"role": "senior", "label": ln.get("label", "Senior Perm"),
+                            "basis": basis, "value": val, "rate": rate, "amort": amort})
+        elif i == 1:  # subordinate / soft-gap (fixed $)
+            friendly["sub_amount"] = val or 0
+            friendly["sub_rate"] = rate or 0
+            friendly["sub_amort"] = amort
+            summary.append({"role": "subordinate", "label": ln.get("label", "Soft/Gap"),
+                            "amount": val, "rate": rate, "amort": amort,
+                            "io": amort == 0})
+        else:
+            unmodelled.append(ln.get("label", f"Loan {i + 1}"))
+    return friendly, {"loans": summary, "unmodelled": unmodelled}
+
+
 def build_market_inputs(*, units_by_bed: dict, rents_by_bed: dict,
                         land_cost: float, opex: dict = None,
-                        financing: dict = None, manager_units: int = 1) -> dict:
+                        financing: dict = None, manager_units: int = 1,
+                        loans: list = None) -> dict:
     """Assemble a friendly-input dict for a market/non-LIHTC deal.
 
     units_by_bed / rents_by_bed accept any bed-key convention (1 | "1" | "1br" |
@@ -378,6 +441,9 @@ def build_market_inputs(*, units_by_bed: dict, rents_by_bed: dict,
     f.update(opex or {})
     f.update(DEFAULT_FINANCING)
     f.update(financing or {})
+    if loans:
+        lf, _ = loans_to_friendly(loans)
+        f.update(lf)
     return f
 
 
@@ -392,9 +458,10 @@ def _parse_num(s):
 
 def build_from_dd(dd: dict, *, units_by_bed: dict, rents_by_bed: dict,
                   opex: dict = None, financing: dict = None,
-                  land_cost: float = None, deal_name: str = None) -> bytes:
+                  land_cost: float = None, deal_name: str = None,
+                  loans: list = None) -> bytes:
     """Build a downloadable non-LIHTC model from DD facts + a unit program +
-    comp rents (+ optional T-12 OpEx / financing overrides).
+    comp rents (+ optional T-12 OpEx / financing / loan-stack overrides).
 
     DD supplies the land/acquisition price (if present); the unit program and
     rents come from the review step + comp scraper. Returns the .xlsx bytes.
@@ -406,9 +473,234 @@ def build_from_dd(dd: dict, *, units_by_bed: dict, rents_by_bed: dict,
         land_cost = 0
     friendly = build_market_inputs(
         units_by_bed=units_by_bed, rents_by_bed=rents_by_bed,
-        land_cost=land_cost, opex=opex, financing=financing,
+        land_cost=land_cost, opex=opex, financing=financing, loans=loans,
     )
     return build_download(friendly, tolerant=True)
+
+
+# --------------------------------------------------------------------------
+# MIXED-INCOME (AMI allocation)  — Workstream B of NONLIHTC_MIXED_INCOME_SPEC.md
+# --------------------------------------------------------------------------
+import json as _json
+
+# Restricted tier blocks in (Z+) Rent Roll: tier slot -> {bed: row}.
+# Slots 0/1 are native (12-15 "80% AMI", 16-19 "110% AMI"); slot 2 (46-49) is
+# the tier-C block added by build_mixedincome_template.py. bed 0=studio,1,2,3.
+TIER_ROWS = [
+    {0: 12, 1: 13, 2: 14, 3: 15},
+    {0: 16, 1: 17, 2: 18, 3: 19},
+    {0: 46, 1: 47, 2: 48, 3: 49},
+]
+MAX_TIERS = len(TIER_ROWS)
+# market rent-roll rows by bed (counts E, rents G); 0=studio
+_MKT_COUNT = {0: "E8", 1: "E9", 2: "E10", 3: "E11"}
+_BED_LABEL = {0: "Studio", 1: "1BR", 2: "2BR", 3: "3BR"}
+
+_STATIC = os.path.join(os.path.dirname(HERE), "web", "static") \
+    if os.path.basename(HERE) != "web" else os.path.join(HERE, "static")
+_HUD = None
+_ZIP2CO = None
+
+
+def _load_ami_data():
+    global _HUD, _ZIP2CO
+    if _HUD is None:
+        with open(os.path.join(_STATIC, "hud_rents.json")) as f:
+            _HUD = _json.load(f)["counties"]
+        with open(os.path.join(_STATIC, "ca_zip_county.json")) as f:
+            _ZIP2CO = _json.load(f)["zipToCounty"]
+    return _HUD, _ZIP2CO
+
+
+def resolve_county_fips(dd: dict) -> str | None:
+    """Resolve a county FIPS for AMI-rent lookup: ZIP from the DD address first
+    (most precise), else a county-name match against the HUD county list."""
+    hud, zip2co = _load_ami_data()
+    addr = dd.get("address") or dd.get("matched_address") or ""
+    m = re.search(r"\b(9\d{4})(?:-\d{4})?\b", str(addr))
+    if m and m.group(1) in zip2co:
+        return zip2co[m.group(1)]
+    ctext = re.sub(r"\bcounty\b|,.*$", "", (dd.get("county") or ""), flags=re.I).strip().lower()
+    if ctext:
+        for fips, rec in hud.items():
+            short = rec["county"].lower().split(" county")[0].strip()
+            if short and (ctext == short or ctext.startswith(short) or short in ctext):
+                return fips
+    return None
+
+
+def ami_rent(fips: str, ami: int, bed: int, utility_allowance: float = 0) -> float | None:
+    """Gross CTCAC/MTSP cap for (county, AMI tier, bedroom), net of any utility
+    allowance. ami is a tier present in hud_rents (20/30/35/40/45/50/55/60/70/
+    80/100/110). bed 0=studio. Returns None if county/tier/bed missing."""
+    hud, _ = _load_ami_data()
+    rec = hud.get(str(fips))
+    if not rec:
+        return None
+    tier = rec["rents"].get(str(int(ami)))
+    if not tier:
+        return None
+    bedkey = "studio" if bed == 0 else f"br{bed}"
+    gross = tier.get(bedkey)
+    return None if gross is None else max(0.0, gross - (utility_allowance or 0))
+
+
+def _largest_remainder(total: int, weights: list) -> list:
+    """Apportion an integer `total` across buckets ∝ weights, summing EXACTLY
+    to total (largest-remainder method). All-zero weights -> all zero."""
+    tw = sum(weights)
+    if total <= 0 or tw <= 0:
+        return [0] * len(weights)
+    raw = [total * w / tw for w in weights]
+    base = [int(x) for x in raw]
+    rem = total - sum(base)
+    order = sorted(range(len(weights)), key=lambda i: raw[i] - base[i], reverse=True)
+    for i in range(rem):
+        base[order[i]] += 1
+    return base
+
+
+def build_mixed_income_inputs(*, units_by_bed: dict, ami_allocation: list,
+                              county_fips: str, market_rents: dict = None,
+                              land_cost: float, opex: dict = None,
+                              financing: dict = None, manager_units: int = 1,
+                              utility_allowance: float = 0, loans: list = None):
+    """Assemble a pre-split `cells` dict for a MIXED-INCOME (AMI) deal, plus a
+    summary for the UI.
+
+    `ami_allocation` = [{"pct": 0.20, "ami": 50}, ...] (≤ MAX_TIERS entries; pct
+    is share of total units; remainder = market). Restricted units are NETTED out
+    of the market allocation so the rent-roll total stays == the unit program
+    (Inputs!H14) — otherwise the model's blended-rent formula (÷H14) over-scales.
+
+    Beds: 1/2/3 only (modular has no studio product); studio rows stay 0.
+    Returns (cells, summary).
+    """
+    if county_fips is None:
+        raise ValueError("mixed-income build needs a county FIPS for AMI rents "
+                         "(resolve_county_fips returned None — pass it explicitly)")
+    tiers = [t for t in (ami_allocation or []) if (t.get("pct") or 0) > 0]
+    if len(tiers) > MAX_TIERS:
+        raise ValueError(f"engine supports {MAX_TIERS} AMI tiers; got {len(tiers)} "
+                         "(add another tier block to the workbook)")
+    if sum(t["pct"] for t in tiers) > 1.0 + 1e-9:
+        raise ValueError("AMI tier percentages exceed 100% of units")
+
+    beds = [1, 2, 3]
+    tot = {b: int(_bed_lookup(units_by_bed, b, 0)) for b in beds}
+    N = sum(tot.values())
+    if N <= 0:
+        raise ValueError("mixed-income build needs a unit program (units_by_bed)")
+    mgr = max(0, int(manager_units))
+    # manager is a 1BR carved from the program (matches the engine's Manager 1BR row)
+    revenue = {b: tot[b] - (mgr if b == 1 else 0) for b in beds}
+    R = sum(revenue.values())
+
+    # tier building-wide totals; clamp the sum to revenue units, plug = market
+    tier_tot = [round(N * t["pct"]) for t in tiers]
+    while sum(tier_tot) > R and any(tier_tot):
+        tier_tot[tier_tot.index(max(tier_tot))] -= 1
+
+    # distribute each tier across beds ∝ revenue mix; market = per-bed residual
+    weights = [revenue[b] for b in beds]
+    tier_by_bed = [dict(zip(beds, _largest_remainder(tt, weights))) for tt in tier_tot]
+    market_by_bed = {}
+    for b in beds:
+        used = sum(tb[b] for tb in tier_by_bed)
+        market_by_bed[b] = max(0, revenue[b] - used)
+        # if tiers over-filled this bed, claw back from the largest tier
+        over = used - revenue[b]
+        while over > 0:
+            j = max(range(len(tier_by_bed)), key=lambda k: tier_by_bed[k][b])
+            if tier_by_bed[j][b] <= 0:
+                break
+            tier_by_bed[j][b] -= 1
+            over -= 1
+
+    # ---- assemble cells -------------------------------------------------
+    friendly = {
+        "units_1br": tot[1], "units_2br": tot[2], "units_3br": tot[3],  # O11:O13 = H14
+        "manager_units": mgr,
+        "rent_studio": 0,
+        "rent_1br": _bed_lookup(market_rents or {}, 1, 0),
+        "rent_2br": _bed_lookup(market_rents or {}, 2, 0),
+        "rent_3br": _bed_lookup(market_rents or {}, 3, 0),
+        "land_cost": land_cost,
+    }
+    friendly.update(DEFAULT_OPEX_PUPM)
+    friendly.update(opex or {})
+    friendly.update(DEFAULT_FINANCING)
+    friendly.update(financing or {})
+    loan_summary = None
+    if loans:
+        lf, loan_summary = loans_to_friendly(loans)
+        friendly.update(lf)
+    cells = split_inputs(friendly, market_mode=False)
+
+    # mixed-mode neutralisers: native set-aside off, not 100%-affordable flag
+    cells[(SH_INPUTS, "O27")] = (0, False)
+    cells[(SH_INPUTS, "O28")] = (0, False)
+    cells[(SH_INPUTS, "O29")] = ("No", True)
+    # market counts as literals (studio 0): the residual after restricted tiers
+    cells[(SH_RENT, "E8")] = (0, False)
+    cells[(SH_RENT, "E9")] = (market_by_bed[1], False)
+    cells[(SH_RENT, "E10")] = (market_by_bed[2], False)
+    cells[(SH_RENT, "E11")] = (market_by_bed[3], False)
+
+    summary_tiers = []
+    for slot in range(MAX_TIERS):
+        rows = TIER_ROWS[slot]
+        if slot < len(tiers):
+            ami = int(tiers[slot]["ami"])
+            tb = tier_by_bed[slot]
+            rents = {}
+            for bed in (0, 1, 2, 3):
+                cnt = tb.get(bed, 0)
+                cells[(SH_RENT, f"E{rows[bed]}")] = (cnt, False)
+                if cnt > 0:
+                    rent = ami_rent(county_fips, ami, bed, utility_allowance)
+                    if rent is None:
+                        raise ValueError(f"no AMI rent for county {county_fips} "
+                                         f"tier {ami}% bed {bed}")
+                    cells[(SH_RENT, f"I{rows[bed]}")] = (rent, False)
+                    cells[(SH_RENT, f"C{rows[bed]}")] = (
+                        f"Restricted {ami}% AMI {_BED_LABEL[bed]}", True)
+                    rents[bed] = rent
+            summary_tiers.append({"ami": ami, "pct": tiers[slot]["pct"],
+                                  "units": sum(tb.values()), "by_bed": tb,
+                                  "rents": rents})
+        else:  # unused tier block -> zero its counts
+            for bed in (0, 1, 2, 3):
+                cells[(SH_RENT, f"E{rows[bed]}")] = (0, False)
+
+    summary = {
+        "county_fips": county_fips, "total_units": N, "manager_units": mgr,
+        "restricted_units": sum(t["units"] for t in summary_tiers),
+        "market_units": sum(market_by_bed.values()),
+        "market_by_bed": market_by_bed, "tiers": summary_tiers,
+        "loans": loan_summary,
+    }
+    return cells, summary
+
+
+def build_mixed_from_dd(dd: dict, *, units_by_bed: dict, ami_allocation: list,
+                        market_rents: dict = None, opex: dict = None,
+                        financing: dict = None, land_cost: float = None,
+                        deal_name: str = None, county_fips: str = None,
+                        utility_allowance: float = 0, loans: list = None):
+    """Mixed-income downloadable model from DD facts + a unit program + an AMI
+    allocation. Returns (xlsx_bytes, summary)."""
+    if land_cost is None:
+        land_cost = _parse_num(dd.get("acquisition_price")) or _parse_num(dd.get("land_cost")) or 0
+    if county_fips is None:
+        county_fips = resolve_county_fips(dd)
+    cells, summary = build_mixed_income_inputs(
+        units_by_bed=units_by_bed, ami_allocation=ami_allocation,
+        county_fips=county_fips, market_rents=market_rents, land_cost=land_cost,
+        opex=opex, financing=financing, utility_allowance=utility_allowance,
+        loans=loans,
+    )
+    return build_download(cells=cells, tolerant=True), summary
 
 
 def selftest():

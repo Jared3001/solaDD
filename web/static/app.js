@@ -1124,6 +1124,7 @@ function renderUnderwriteNonLihtc(uw) {
     <p class="combined">${mixed ? "Mixed-income" : "Market"} model generated on the clean pre-v28 ModularZ engine — download is a .zip:</p>
     <ul class="uw-models">${models}</ul>
     ${amiBlock}
+    ${loanBlock}
     ${haveReturns
       ? `<h3 class="section-head">Headline returns</h3><table>${retRows}</table>`
       : `<p class="hint">Returns didn't recalc server-side — open the .xlsx (it recalcs on load).</p>`}
