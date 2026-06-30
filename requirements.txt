@@ -9,6 +9,8 @@ gunicorn>=21.2
 openpyxl==3.1.5
 PyYAML==6.0.3
 requests==2.34.2
+# deal one-pager PDF (build/sources/deal_onepager.py)
+reportlab>=4.0,<6
 
 # deal-tracker export -> Google Sheets (dormant until TRACKER_SHEET_ID + creds set)
 gspread>=6.1,<7

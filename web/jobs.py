@@ -759,6 +759,30 @@ def run_lihtc_scenarios(job):
 # --------------------------------------------------------------------------- #
 # pdf_summary — generates the one-pager PDF from a completed lihtc_scenarios job
 # --------------------------------------------------------------------------- #
+def _default_lihtc_scenarios(base):
+    """Synthesize the default Modular + Stick scenarios from a deal's base_cells,
+    so the one-pager works from a plain v28 LIHTC model — not just a scenario
+    batch. _scenario_inputs overrides C15/C18/I3/I5/I6/C11 from the scenario, so
+    we feed it the deal's own defaults (mix, stories, large-family flag)."""
+    def g(ref):
+        return base.get(("Pro_Forma", ref), base.get(ref))
+    def fnum(ref, dflt):
+        try:
+            return float(g(ref))
+        except (TypeError, ValueError):
+            return dflt
+    common = {
+        "stories":  int(fnum("C15", 5)) or 5,
+        "podium":   int(fnum("C18", 1)) or 1,
+        "shStudio": fnum("I3", 0.0),
+        "sh2B":     fnum("I5", 0.0),
+        "sh3B":     fnum("I6", 0.0),
+        "lf":       g("C11") or "No",
+    }
+    return [{"name": "Modular", "constr": "Modular", **common},
+            {"name": "Stick", "constr": "Stick", **common}]
+
+
 def run_pdf_summary(job):
     inp = job["input"]
     from_jid = inp.get("from_job")
@@ -798,7 +822,12 @@ def run_pdf_summary(job):
 
     selected = prior_inp.get("scenarios") or []
     if not selected:
-        raise RuntimeError("No scenarios found on the source job.")
+        # No scenario batch (a plain v28 LIHTC model): synthesize Modular + Stick
+        # at the deal's defaults. Non-LIHTC returns don't fit this PDF yet.
+        if (prior.get("underwrite") or {}).get("deal_type") == "nonlihtc":
+            raise RuntimeError("The one-pager is built for LIHTC tax-credit returns "
+                               "and isn't available for non-LIHTC models yet.")
+        selected = _default_lihtc_scenarios(_base)
 
     import modularz_calc as _mz
 
