@@ -1137,8 +1137,11 @@ def deal_stages(dd_jid):
         m_extra = {"program": uw.get("program"), "deal_type": uw.get("deal_type"),
                    "returns": uw.get("returns"), "models": uw.get("models")}
     cm_extra = {}
-    if comps and comps.get("comps_data"):
-        cm_extra = {"beds": sorted(int(b) for b in comps["comps_data"].keys())}
+    if comps:
+        beds = (sorted(int(b) for b in comps["comps_data"].keys()) if comps.get("comps_data")
+                else comps.get("comps_beds"))
+        if beds:
+            cm_extra = {"beds": beds}
 
     return {
         "dd": stage(dd, {"address": addr}),
@@ -1446,9 +1449,13 @@ def _downloadable(j):
 
 
 def recent_jobs(n=12):
-    """Most recent completed runs, newest first — re-download + 'generate model' list."""
+    """Most recent completed DEALS (a DD run), newest first — the 'Your deals'
+    list. Only due-diligence runs appear; their downstream outputs (rent comps,
+    financial models, scenario sets, one-pagers) live inside the deal's workspace,
+    not as separate rows."""
     with _lock:
-        done = [j for j in _jobs.values() if j.get("status") == "done"]
+        done = [j for j in _jobs.values()
+                if j.get("status") == "done" and j.get("kind") in ("single", "assemblage")]
     done.sort(key=lambda j: j.get("finished") or "", reverse=True)
     out = []
     for j in done[:n]:
@@ -1474,10 +1481,28 @@ def _persist_index():
     recs = []
     for j in done[:MAX_JOBS]:
         nfields, nflags = _job_counts(j)
-        recs.append({"id": j["id"], "kind": j["kind"], "label": j.get("label") or j["id"],
-                     "finished": j.get("finished"), "file": j.get("file"),
-                     "filename": j.get("filename"), "n_fields": nfields, "n_flags": nflags,
-                     "underwrite": bool(j.get("underwrite"))})
+        inp = j.get("input") or {}
+        rec = {"id": j["id"], "kind": j["kind"], "label": j.get("label") or j["id"],
+               "finished": j.get("finished"), "file": j.get("file"),
+               "filename": j.get("filename"), "n_fields": nfields, "n_flags": nflags,
+               "underwrite": bool(j.get("underwrite"))}
+        # Linkage so the deal workspace can rebuild the pipeline after a redeploy.
+        if inp.get("from_job"):
+            rec["from_job"] = inp["from_job"]
+        addr = (j.get("geo") or {}).get("matched_address")
+        if addr:
+            rec["address"] = addr
+        uw = j.get("underwrite")
+        if uw:
+            rec["uw"] = {"program": uw.get("program"), "deal_type": uw.get("deal_type"),
+                         "returns": uw.get("returns"), "ami": uw.get("ami"),
+                         "loans": uw.get("loans"), "models": uw.get("models"),
+                         "units_by_bed": (inp.get("nonlihtc") or {}).get("units_by_bed")}
+        if j.get("comps_data"):
+            rec["comps_beds"] = sorted(int(b) for b in j["comps_data"].keys())
+        if j.get("concluded_rents"):
+            rec["concluded_rents"] = j["concluded_rents"]
+        recs.append(rec)
     with _index_lock:
         try:
             INDEX_FILE.write_text(json.dumps(recs))
@@ -1496,16 +1521,31 @@ def _load_index():
     for r in recs:
         if r.get("id") in _jobs or not r.get("file"):
             continue
+        uw = r.get("uw")
+        stub_uw = None
+        if uw:
+            stub_uw = {"program": uw.get("program"), "deal_type": uw.get("deal_type"),
+                       "returns": uw.get("returns") or {}, "ami": uw.get("ami"),
+                       "loans": uw.get("loans"), "models": uw.get("models") or []}
+        elif r.get("underwrite"):
+            stub_uw = {"models": []}
+        stub_input = {}
+        if r.get("from_job"):
+            stub_input["from_job"] = r["from_job"]
+        if uw and uw.get("units_by_bed"):
+            stub_input["nonlihtc"] = {"units_by_bed": uw["units_by_bed"]}
         _jobs[r["id"]] = {
             "id": r["id"], "kind": r.get("kind", "single"), "status": "done",
             "label": r.get("label"), "file": r.get("file"), "filename": r.get("filename"),
             "finished": r.get("finished"), "started": r.get("finished"),
             "fields": {}, "_n_fields": r.get("n_fields", 0), "_n_flags": r.get("n_flags", 0),
-            "underwrite": {"models": []} if r.get("underwrite") else None,
-            "geo": None, "in_la_city": None, "phase": "Complete",
+            "underwrite": stub_uw,
+            "geo": {"matched_address": r["address"]} if r.get("address") else None,
+            "in_la_city": None, "phase": "Complete",
             "total": r.get("n_fields", 0), "completed": r.get("n_fields", 0),
             "parcels": None, "combined_sf": None, "om": None, "error": None,
-            "input": {}, "_lock": threading.Lock(), "_rehydrated": True,
+            "comps_beds": r.get("comps_beds"), "concluded_rents": r.get("concluded_rents"),
+            "input": stub_input, "_lock": threading.Lock(), "_rehydrated": True,
         }
 
 
