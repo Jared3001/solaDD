@@ -204,8 +204,12 @@ const DealWorkspace = {
       if (!res.ok) throw new Error(data.error || "Couldn't load this deal.");
       this.render(data);
       const p = $("#deal-workspace");
+      // Only scroll on the first reveal. refresh() reuses open() every poll
+      // tick (~1.2s) while a downstream stage runs; scrolling on each tick
+      // would keep yanking the page back and fight the user's own scrolling.
+      const wasHidden = p.classList.contains("hidden");
       p.classList.remove("hidden");
-      p.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (wasHidden) p.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) { showError(err.message); }
   },
   async refresh() { if (_activeDealId) await this.open(_activeDealId); },
