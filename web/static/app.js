@@ -249,19 +249,17 @@ const DealWorkspace = {
 
     const sState = jobState(summary);
     const modelDone = mState === "done";
-    // The one-pager is LIHTC tax-credit shaped — works from any LIHTC model
-    // (v28 default or a scenario set), not from non-LIHTC yet.
-    const isLihtc = model.deal_type !== "nonlihtc";
+    const nonlihtc = model.deal_type === "nonlihtc";
     let s4;
     if (sState === "done" || sState === "running" || sState === "error") {
-      s4 = { state: sState, name: "One-pager", sub: "3-page investment PDF",
+      s4 = { state: sState, name: "One-pager",
+             sub: nonlihtc ? "1-page investment PDF" : "3-page investment PDF",
              actions: summary.downloadable ? [dlBtn(summary.id, "One-pager .pdf")] : [] };
-    } else if (modelDone && isLihtc) {
-      s4 = { state: "ready", name: "One-pager", sub: "3-page investment PDF — KPIs, returns, debt, comps",
-             actions: [actBtn(`DealWorkspace.buildSummary('${model.id}')`, "Generate one-pager", false)] };
     } else if (modelDone) {
-      s4 = { state: "locked", name: "One-pager", muted: true,
-             sub: "Built for LIHTC tax-credit returns — not available for non-LIHTC models yet" };
+      s4 = { state: "ready", name: "One-pager",
+             sub: nonlihtc ? "1-page PDF — returns, capital stack, AMI mix"
+               : "3-page investment PDF — KPIs, returns, debt, comps",
+             actions: [actBtn(`DealWorkspace.buildSummary('${model.id}')`, "Generate one-pager", false)] };
     } else {
       s4 = { state: "locked", name: "One-pager", muted: true, sub: "Build a model first" };
     }

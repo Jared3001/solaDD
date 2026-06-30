@@ -783,6 +783,56 @@ def _default_lihtc_scenarios(base):
             {"name": "Stick", "constr": "Stick", **common}]
 
 
+def _run_nonlihtc_onepager(job, prior, dd, deal):
+    """Render the non-LIHTC one-pager from the model job's already-stored returns,
+    AMI allocation, and loan stack (no LibreOffice recompute needed)."""
+    import re
+    uw = prior.get("underwrite") or {}
+    params = (prior.get("input") or {}).get("nonlihtc") or {}
+    ubb = params.get("units_by_bed") or {}
+
+    def _bed(d, b):
+        for k in (b, str(b), f"{b}br", f"{b}BR"):
+            if d.get(k):
+                return int(d[k])
+        return 0
+
+    unit_mix = [{"type": lbl, "count": _bed(ubb, b)}
+                for b, lbl in ((1, "1 Bed"), (2, "2 Bed"), (3, "3 Bed")) if _bed(ubb, b)]
+    n_units = ((uw.get("ami") or {}).get("total_units")
+               or sum(u["count"] for u in unit_mix) or None)
+
+    addr = dd.get("address") or ""
+    street, city_state = (addr.split(",", 1) + [""])[:2] if "," in addr else (addr, "")
+    lot_m = re.search(r"[\d,]{3,}", str(dd.get("land_sf") or ""))
+    lot = f"{int(lot_m.group().replace(',', '')):,} SF" if lot_m else None
+
+    deal_dict = {
+        "name": deal, "address": street.strip(), "city_state": city_state.strip(),
+        "submarket": (dd.get("county") or "").strip() or None,
+        "program": uw.get("program") or "market",
+        "n_units": n_units, "unit_mix": unit_mix,
+        "returns": uw.get("returns") or {}, "ami": uw.get("ami"), "loans": uw.get("loans"),
+        "lot": lot, "as_of": datetime.datetime.now(datetime.timezone.utc).date(),
+    }
+
+    job["phase"] = "Generating the non-LIHTC one-pager…"
+    import sys, importlib
+    sys.path.insert(0, str(Path(__file__).parent.parent / "build" / "sources"))
+    try:
+        import deal_onepager as _op
+        importlib.reload(_op)
+    except ImportError:
+        import deal_onepager as _op
+
+    pdf_path = RUN_DIR / f"{job['id']}_onepager.pdf"
+    _op.generate_nonlihtc(deal_dict, str(pdf_path))
+    job["file"] = str(pdf_path)
+    job["filename"] = f"{_safe_name(deal)}_one_pager.pdf"
+    job["total"] = job["completed"] = 1
+    job["phase"] = "Complete"
+
+
 def run_pdf_summary(job):
     inp = job["input"]
     from_jid = inp.get("from_job")
@@ -820,13 +870,14 @@ def run_pdf_summary(job):
     deal = deal_override or prior_inp.get("name") or _base.get(("Pro_Forma", "B2")) or "Untitled Deal"
     job["label"] = f"{deal} — PDF summary"
 
+    # Non-LIHTC model: render the market/mixed-income one-pager from the returns,
+    # AMI allocation, and loan stack already stored on the model job (no recompute).
+    if (prior.get("underwrite") or {}).get("deal_type") == "nonlihtc":
+        return _run_nonlihtc_onepager(job, prior, dd, deal)
+
     selected = prior_inp.get("scenarios") or []
     if not selected:
-        # No scenario batch (a plain v28 LIHTC model): synthesize Modular + Stick
-        # at the deal's defaults. Non-LIHTC returns don't fit this PDF yet.
-        if (prior.get("underwrite") or {}).get("deal_type") == "nonlihtc":
-            raise RuntimeError("The one-pager is built for LIHTC tax-credit returns "
-                               "and isn't available for non-LIHTC models yet.")
+        # No scenario batch (a plain v28 LIHTC model): synthesize Modular + Stick.
         selected = _default_lihtc_scenarios(_base)
 
     import modularz_calc as _mz

@@ -84,6 +84,24 @@ def _date(d):
     return d.strftime("%b %Y") if isinstance(d, (datetime.date, datetime.datetime)) else str(d)
 
 
+def _clip(c, text, font, size, maxw):
+    """Truncate text with an ellipsis so it fits within maxw points."""
+    text = str(text)
+    if c.stringWidth(text, font, size) <= maxw:
+        return text
+    while text and c.stringWidth(text + "…", font, size) > maxw:
+        text = text[:-1]
+    return text + "…"
+
+
+def _fit_font(c, text, font, max_size, min_size, maxw):
+    """Largest size in [min,max] at which text fits maxw (else min)."""
+    s = max_size
+    while s > min_size and c.stringWidth(str(text), font, s) > maxw:
+        s -= 1
+    return s
+
+
 def _avg_unit_sf(deal):
     mix = deal.get("unit_mix") or []
     if mix:
@@ -828,6 +846,163 @@ def generate(deal: dict, out_path: str) -> str:
     _page2(c, deal)
     c.showPage()
     _page3(c, deal)
+    c.showPage()
+    c.save()
+    return out_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# Non-LIHTC one-pager — single page (market / mixed-income returns + capital stack)
+# ─────────────────────────────────────────────────────────────────────────────────
+
+def _nl_money(v, dp=1):
+    """Compact $ for non-LIHTC returns: M for ≥$1M, K below, '—' for None."""
+    if v is None:
+        return "—"
+    neg = "-" if v < 0 else ""
+    a = abs(v)
+    if a >= 1e6:
+        return f"{neg}${a/1e6:.{dp}f}M"
+    if a >= 1e3:
+        return f"{neg}${a/1e3:.0f}K"
+    return f"{neg}${a:,.0f}"
+
+
+def generate_nonlihtc(deal: dict, out_path: str) -> str:
+    """Render a single-page non-LIHTC one-pager and return the output path.
+
+    `deal` carries: name, address, city_state, submarket, program, n_units,
+    unit_mix [{type,count}], returns (the underwrite HEADLINE dict), ami (mixed-
+    income tier summary or None), loans ({loans:[...],unmodelled:[]} or None),
+    as_of."""
+    c = rl_canvas.Canvas(out_path, pagesize=letter)
+    c.setTitle(f"{deal['name']} — SoLa Impact Non-LIHTC One Pager")
+    c.setAuthor("SoLa Impact")
+    r = deal.get("returns") or {}
+
+    # ── Header ───────────────────────────────────────────────────────────────────
+    BAR_H = 82
+    c.setFillColor(NAVY); c.rect(0, H - BAR_H, W, BAR_H, fill=1, stroke=0)
+    c.setFillColor(AMBER); c.rect(0, H - BAR_H, W, 3, fill=1, stroke=0)
+    c.setFillColor(WHITE)
+    _nm = deal["name"].upper()
+    _nmw = CW - 96  # leave room for "SoLa Impact" at the right
+    _nsz = _fit_font(c, _nm, "Archivo", 22, 13, _nmw)
+    c.setFont("Archivo", _nsz); c.drawString(M, H - 38, _clip(c, _nm, "Archivo", _nsz, _nmw))
+    c.setFont("Archivo", 9); c.setFillColor(AMBER); c.drawString(M, H - 54, "NON-LIHTC FEASIBILITY")
+    prog = "Mixed-income" if (deal.get("program") == "mixed-income") else "Market rate"
+    units = f"{deal['n_units']} units" if deal.get("n_units") else "—"
+    c.setFont("Serif", 8.5); c.setFillColor(MID_GRAY)
+    c.drawString(M, H - 68, f"{prog}  ·  {units}  ·  As of {_date(deal.get('as_of'))}")
+    c.setFont("Archivo", 9); c.setFillColor(WHITE)
+    tw = c.stringWidth("SoLa Impact", "Archivo", 9); c.drawString(W - M - tw, H - 38, "SoLa Impact")
+    c.setFont("Serif", 7); c.setFillColor(MID_GRAY)
+    c.drawRightString(W - M, H - 52, "CONFIDENTIAL — INTERNAL USE ONLY")
+    _footer(c, 1, total=1, as_of=deal.get("as_of"))
+
+    TOP = H - BAR_H - 12
+
+    # ── KPI chips: the levered returns ───────────────────────────────────────────
+    CHIPS = [
+        ("Levered IRR",    _pct(r.get("Levered IRR"))),
+        ("Equity Multiple", _mult(r.get("Equity Multiple"))),
+        ("Cash-on-Cash",   _pct(r.get("Cash-on-Cash"))),
+        ("Untrended YoC",  _pct(r.get("Untrended Yield-on-Cost"))),
+    ]
+    CHIP_H, GAP = 42, 6
+    CHIP_W = (CW - 3 * GAP) / 4
+    cy = TOP - CHIP_H
+    for i, (label, val) in enumerate(CHIPS):
+        cx = M + i * (CHIP_W + GAP)
+        c.setFillColor(PAPER); c.roundRect(cx, cy, CHIP_W, CHIP_H, 4, fill=1, stroke=0)
+        c.setStrokeColor(LINE); c.setLineWidth(0.5); c.roundRect(cx, cy, CHIP_W, CHIP_H, 4, fill=0, stroke=1)
+        c.setFont("MonoBold", 16); c.setFillColor(NAVY if val != "—" else GRAY)
+        vw = c.stringWidth(val, "MonoBold", 16); c.drawString(cx + CHIP_W / 2 - vw / 2, cy + 18, val)
+        c.setFont("Serif", 7.5); c.setFillColor(GRAY)
+        lw = c.stringWidth(label, "Serif", 7.5); c.drawString(cx + CHIP_W / 2 - lw / 2, cy + 6, label)
+
+    TOP = cy - 16
+    LX, LW = M, 270
+    RX = M + LW + 16
+    KW = 104
+
+    # ── LEFT: project + unit mix + AMI allocation ────────────────────────────────
+    y = TOP
+    _section_label(c, LX, y, "Project"); y -= 14
+    c.setFont("Archivo", 11); c.setFillColor(INK)
+    c.drawString(LX, y, _clip(c, deal["name"], "Archivo", 11, LW)); y -= 13
+    c.setFont("Serif", 9); c.setFillColor(GRAY)
+    for line in (deal.get("address"), deal.get("city_state"), deal.get("submarket")):
+        if line:
+            c.drawString(LX, y, _clip(c, line, "Serif", 9, LW)); y -= 12
+    y -= 4; _rule(c, y); y -= 12
+    for key, val in (("Program", prog),
+                     ("# of Units", units),
+                     ("Construction", deal.get("construction") or "Modular"),
+                     ("Lot Area", deal.get("lot") or "—")):
+        _kv(c, LX, y, key, val, key_w=KW); y -= 12
+    y -= 4; _rule(c, y); y -= 12
+
+    _section_label(c, LX, y, "Unit Mix"); y -= 12
+    for um in (deal.get("unit_mix") or []):
+        _kv(c, LX, y, um["type"], f"{um['count']} units" if um.get("count") else "—", key_w=55); y -= 12
+    if not deal.get("unit_mix"):
+        _kv(c, LX, y, "Mix", "—", key_w=55); y -= 12
+
+    ami = deal.get("ami")
+    if ami and (ami.get("tiers") or []):
+        y -= 4; _rule(c, y); y -= 12
+        _section_label(c, LX, y, "AMI Allocation"); y -= 12
+        for t in ami["tiers"]:
+            rents = t.get("rents") or {}
+            rep = next((rents[b] for b in (1, 2, 3) if rents.get(b)), None)
+            note = f"  ·  1BR ${rep:,.0f}" if rep else ""
+            _kv(c, LX, y, f"{int(t['ami'])}% AMI", f"{t['units']} units{note}", key_w=70); y -= 12
+        if ami.get("market_units"):
+            _kv(c, LX, y, "Market", f"{ami['market_units']} units", key_w=70); y -= 12
+        _kv(c, LX, y, "Manager", f"{ami.get('manager_units', 0)} unit", key_w=70); y -= 12
+
+    # ── RIGHT: returns + capital stack ───────────────────────────────────────────
+    yr = TOP
+    _section_label(c, RX, yr, "Returns"); yr -= 14
+    RET = [
+        ("Net Operating Income", _nl_money(r.get("Net Operating Income"))),
+        ("Effective Gross Inc.", _nl_money(r.get("Effective Gross Income"))),
+        ("Operating Expenses",   _nl_money(r.get("Operating Expenses"))),
+        ("Total Dev Cost",       _nl_money(r.get("Total Dev Cost"))),
+        ("Price / Unit",         _nl_money(r.get("Price per Unit"))),
+        ("Equity Required",      _nl_money(r.get("Equity Required"))),
+        ("Debt",                 _nl_money(r.get("Debt"))),
+        ("Total Profit",         _nl_money(r.get("Total Profit"))),
+    ]
+    for key, val in RET:
+        _kv(c, RX, yr, key, val, key_w=130, val_font="MonoBold"); yr -= 13
+    yr -= 4; c.setStrokeColor(LINE); c.setLineWidth(0.5); c.line(RX, yr, W - M, yr); yr -= 12
+
+    loans = deal.get("loans")
+    _section_label(c, RX, yr, "Capital Stack"); yr -= 13
+    rows = (loans or {}).get("loans") or []
+    if rows:
+        for l in rows:
+            if l.get("role") == "senior":
+                basis = (l.get("basis") or "").upper()
+                amt = f"{basis} {l.get('value')}" if basis else "—"
+                desc = f"{amt} @ {_pct(l.get('rate'), 2)} / {l.get('amort') or '—'}yr"
+            else:
+                desc = f"{_nl_money(l.get('amount'))} @ {_pct(l.get('rate'), 2)} · {'IO' if l.get('io') else str(l.get('amort'))+'yr'}"
+            c.setFont("Serif", 8); c.setFillColor(INK); c.drawString(RX, yr, l.get("label") or "Loan")
+            c.setFont("Mono", 7.5); c.setFillColor(GRAY)
+            c.drawString(RX, yr - 10, desc); yr -= 22
+        for u in (loans.get("unmodelled") or []):
+            c.setFont("Serif", 7.5); c.setFillColor(GRAY)
+            c.drawString(RX, yr, f"+ {u} (not in monthly CF)"); yr -= 12
+    else:
+        c.setFont("Serif", 8); c.setFillColor(GRAY)
+        c.drawString(RX, yr, "Single permanent loan (model default)"); yr -= 12
+
+    c.setFont("Serif", 7); c.setFillColor(GRAY)
+    c.drawString(RX, yr - 4, "Levered IRR & Equity Multiple reflect the full stack.")
+
     c.showPage()
     c.save()
     return out_path
