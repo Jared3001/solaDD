@@ -1461,9 +1461,13 @@ def recent_jobs(n=12):
     for j in done:
         if len(out) >= n:
             break
-        key = _norm_addr((j.get("geo") or {}).get("matched_address") or j.get("label"))
+        # Key on the street portion (before the first comma) so the same site
+        # logged at different detail — "2921 E St" vs "2921 E St, San Diego, CA
+        # 92102" — collapses to one row (latest kept).
+        addr = (j.get("geo") or {}).get("matched_address") or j.get("label") or ""
+        key = _norm_addr(addr.split(",")[0])
         if key and key in seen:
-            continue  # an older DD run of the same site — keep only the latest
+            continue
         if key:
             seen.add(key)
         nfields, nflags = _job_counts(j)
