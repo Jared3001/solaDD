@@ -583,35 +583,71 @@ def _run_underwrite_nonlihtc(job, dd, deal, meta):
     params = inp.get("nonlihtc") or {}
     units_by_bed = params.get("units_by_bed")
     rents_by_bed = params.get("rents_by_bed")
-    if not units_by_bed or not rents_by_bed:
+    ami_allocation = params.get("ami_allocation")
+    if not units_by_bed:
         raise RuntimeError(
-            "Non-LIHTC model needs a unit program (units_by_bed) and market rents "
-            "(rents_by_bed) from the review step / comp scraper.")
+            "Non-LIHTC model needs a unit program (units_by_bed) from the review step.")
+    if not ami_allocation and not rents_by_bed:
+        raise RuntimeError(
+            "Non-LIHTC market model needs market rents (rents_by_bed) from the "
+            "comp scraper, or an AMI allocation for a mixed-income deal.")
 
-    job["phase"] = "Building the non-LIHTC market model…"
     import nonlihtc_calc as _nl
     land_cost = params.get("land_cost") or _nl._parse_num(dd.get("acquisition_price"))
-    blob = _nl.build_from_dd(
-        dd, units_by_bed=units_by_bed, rents_by_bed=rents_by_bed,
-        opex=params.get("opex"), financing=params.get("financing"),
-        land_cost=land_cost, deal_name=deal,
-    )
+    loans = params.get("loans")
+    ami_summary = None
+    loan_summary = None
 
-    # Headline returns for the UI (recalc the same friendly inputs). Best-effort:
-    # the .xlsx is the deliverable, so a recalc hiccup must not fail the job.
-    returns = {}
-    try:
-        friendly = _nl.build_market_inputs(
-            units_by_bed=units_by_bed, rents_by_bed=rents_by_bed,
-            land_cost=land_cost or 0, opex=params.get("opex"),
-            financing=params.get("financing"),
+    if ami_allocation:
+        # Mixed-income (AMI allocation): restricted tiers + any market remainder.
+        job["phase"] = "Building the non-LIHTC mixed-income model…"
+        county_fips = params.get("county_fips") or _nl.resolve_county_fips(dd)
+        if not county_fips:
+            raise RuntimeError(
+                "Couldn't resolve a county for AMI rents — add a ZIP to the address "
+                "or pick the county.")
+        blob, ami_summary = _nl.build_mixed_from_dd(
+            dd, units_by_bed=units_by_bed, ami_allocation=ami_allocation,
+            market_rents=rents_by_bed, opex=params.get("opex"),
+            financing=params.get("financing"), land_cost=land_cost,
+            deal_name=deal, county_fips=county_fips, loans=loans,
         )
-        returns = _nl.recalc(friendly)
-    except Exception:  # noqa: BLE001
-        traceback.print_exc()
+        arc = f"{deal} — Non-LIHTC (Mixed-Income).xlsx"
+        returns = {}
+        try:
+            cells, _ = _nl.build_mixed_income_inputs(
+                units_by_bed=units_by_bed, ami_allocation=ami_allocation,
+                county_fips=county_fips, market_rents=rents_by_bed,
+                land_cost=land_cost or 0, opex=params.get("opex"),
+                financing=params.get("financing"), loans=loans)
+            returns = _nl.recalc(cells=cells)
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
+        if ami_summary:
+            loan_summary = ami_summary.get("loans")
+    else:
+        # Pure market mode (existing behavior).
+        job["phase"] = "Building the non-LIHTC market model…"
+        blob = _nl.build_from_dd(
+            dd, units_by_bed=units_by_bed, rents_by_bed=rents_by_bed,
+            opex=params.get("opex"), financing=params.get("financing"),
+            land_cost=land_cost, deal_name=deal, loans=loans,
+        )
+        arc = f"{deal} — Non-LIHTC (Market).xlsx"
+        returns = {}
+        try:
+            friendly = _nl.build_market_inputs(
+                units_by_bed=units_by_bed, rents_by_bed=rents_by_bed,
+                land_cost=land_cost or 0, opex=params.get("opex"),
+                financing=params.get("financing"), loans=loans,
+            )
+            returns = _nl.recalc(friendly=friendly)
+        except Exception:  # noqa: BLE001
+            traceback.print_exc()
+        if loans:
+            _, loan_summary = _nl.loans_to_friendly(loans)
 
     import zipfile
-    arc = f"{deal} — Non-LIHTC (Market).xlsx"
     zip_path = RUN_DIR / f"{job['id']}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(arc, blob)
@@ -619,9 +655,12 @@ def _run_underwrite_nonlihtc(job, dd, deal, meta):
     job["underwrite"] = {
         "deal": deal,
         "deal_type": "nonlihtc",
+        "program": "mixed-income" if ami_allocation else "market",
         "models": [arc],
         "default_model": arc,
         "returns": {k: _jsonable(v) for k, v in returns.items()},
+        "ami": ami_summary,  # already JSON-safe (ints/floats/str/nested)
+        "loans": loan_summary,  # {loans:[...], unmodelled:[...]} or None
         "inputs": {k: _jsonable(v) for k, v in dd.items()},
         "hand_fields": [],
     }
@@ -634,6 +673,28 @@ def _run_underwrite_nonlihtc(job, dd, deal, meta):
 # --------------------------------------------------------------------------- #
 # LIHTC scenario batch — selected scenario list -> one .xlsm each -> zip
 # --------------------------------------------------------------------------- #
+def _scn_label(scn):
+    """Human label rebuilt from the scenario's actual params, so the per-file
+    name always matches what was run (mirrors scenarioLabel() in app.js). The old
+    static client name caused an 82/18 mix to download as '50% 2B'."""
+    constr = scn.get("constr", "")
+    stories = scn.get("stories", "")
+    podium = int(scn.get("podium") or 0)
+    pod = f", podium {podium}" if podium > 0 else ", no podium"
+    if str(scn.get("lf", "No")).strip().lower() in ("yes", "y", "true"):
+        return f"{constr} {stories}st{pod} — Large Family (50% 1B · 25% 2B · 25% 3B)"
+    st = round(float(scn.get("shStudio", 0)) * 100)
+    b2 = round(float(scn.get("sh2B", 0)) * 100)
+    b3 = round(float(scn.get("sh3B", 0)) * 100)
+    b1 = max(0, 100 - st - b2 - b3)
+    parts = []
+    if st: parts.append(f"{st}% Studio")
+    if b1: parts.append(f"{b1}% 1B")
+    if b2: parts.append(f"{b2}% 2B")
+    if b3: parts.append(f"{b3}% 3B")
+    return f"{constr} {stories}st{pod} — {' · '.join(parts) or '—'}"
+
+
 def run_lihtc_scenarios(job):
     inp = job["input"]
 
@@ -671,7 +732,8 @@ def run_lihtc_scenarios(job):
     import modularz_calc as _mz
 
     def _build(scn):
-        return (f"{deal} — {scn['name']}.xlsm", _mz.build_for_scenario(dd, scn, deal_name=deal))
+        arc = f"{deal} — {_scn_label(scn)}.xlsm".replace("/", "-").replace("\\", "-")
+        return (arc, _mz.build_for_scenario(dd, scn, deal_name=deal))
 
     job["phase"] = "Building scenario models…"
     with ThreadPoolExecutor(max_workers=len(selected)) as ex:
@@ -754,7 +816,7 @@ def run_pdf_summary(job):
         units = vals.get("C14")
         cap_fee = vals.get("D97")   # Capitalized Dev Fee (= total C47 - deferred D71)
         return {
-            "name":    scn["name"],
+            "name":    _scn_label(scn),
             "constr":  scn["constr"],
             "stories": scn["stories"],
             "lf":      scn.get("lf", "No"),
@@ -788,7 +850,7 @@ def run_pdf_summary(job):
             job["phase"] = f"Computed {job['completed']}/{len(selected)} scenarios…"
 
     # Preserve the original selection order for the PDF table.
-    order = {scn["name"]: i for i, scn in enumerate(selected)}
+    order = {_scn_label(scn): i for i, scn in enumerate(selected)}
     scn_data.sort(key=lambda s: order.get(s["name"], 999))
 
     # Expose results + source DD path for the deal-tracker export hook.
@@ -976,6 +1038,15 @@ def underwrite_intake(jid):
     cr = latest_comp_rents((job.get("geo") or {}).get("matched_address") or job.get("label"))
     if cr:
         payload["comp_rents"] = cr
+    # County FIPS for the non-LIHTC mixed-income AMI-rent preview (best-effort).
+    try:
+        import nonlihtc_calc as _nl
+        fips = _nl.resolve_county_fips({**dd, "address":
+                (job.get("geo") or {}).get("matched_address") or dd.get("address")})
+        if fips:
+            payload["county_fips"] = fips
+    except Exception:  # noqa: BLE001
+        pass
     return payload
 
 

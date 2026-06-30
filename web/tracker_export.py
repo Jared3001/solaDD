@@ -74,12 +74,23 @@ DESC_COLS = {
 }
 
 # First column (1-based) of each 8-wide scenario block.
-#   5-Story Modular -> M(13);  12-Story Modular -> U(21);  Stick Built -> AC(29)
+#   Low-rise Modular -> M(13);  High-rise Modular -> U(21);  Stick (low-rise) -> AC(29)
+# Keyed by (construction, height-tier) rather than a literal story count: stories
+# are now analyst-editable in the picker (e.g. a 4-story Stick), but each scenario
+# still maps to the same conceptual tracker column. Tier = "high" at 8+ stories.
 SCEN_BLOCK_START = {
-    ("Modular", 5):  13,
-    ("Modular", 12): 21,
-    ("Stick",   5):  29,
+    ("Modular", "low"):  13,
+    ("Modular", "high"): 21,
+    ("Stick",   "low"):  29,
+    ("Stick",   "high"): 29,  # no separate Stick high-rise column; share the slot
 }
+
+
+def _height_tier(stories):
+    try:
+        return "high" if int(stories) >= 8 else "low"
+    except (TypeError, ValueError):
+        return "low"
 # Field order within a block (offset 0..7), keyed to _calc()'s results dict.
 SCEN_FIELDS = [
     "tdc_unit",          # TDC/Unit
@@ -291,7 +302,7 @@ def scenario_colvals(scenarios):
     colvals = {}
     set_aside = None
     for scn in scenarios or []:
-        start = SCEN_BLOCK_START.get((scn.get("constr"), scn.get("stories")))
+        start = SCEN_BLOCK_START.get((scn.get("constr"), _height_tier(scn.get("stories"))))
         if not start:
             continue
         res = scn.get("results") or {}

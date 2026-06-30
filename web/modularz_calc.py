@@ -252,7 +252,7 @@ def _scenario_inputs(dd, scenario, deal_name=None):
     num.update({
         "C15": int(scenario["stories"]),
         "C18": int(scenario["podium"]),
-        "I3":  0.0,
+        "I3":  float(scenario.get("shStudio", 0.0)),
         "I5":  float(scenario["sh2B"]),
         "I6":  float(scenario["sh3B"]),
     })

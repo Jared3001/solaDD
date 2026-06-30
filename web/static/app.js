@@ -189,14 +189,29 @@ let _modelReview = { jobId: null, intake: null, dealType: "lihtc" };
 // OpEx factors parsed from an uploaded T-12 (per-unit-per-month, plus mgmt %).
 // Populated by mountNonLihtcT12(); folded into the non-LIHTC payload on confirm.
 let _nlT12Opex = null;
+// County FIPS for the non-LIHTC mixed-income AMI-rent preview (from intake).
+let _nlCountyFips = null;
+const AMI_PROGRAM = { MIXED: "Mixed-income (AMI)", MARKET: "Market rate" };
+const AMI_LEVELS = ["50", "55", "60", "70", "80", "100"];
+
+// Gross CTCAC AMI cap from window.HUD_RENTS for the live preview (server recomputes
+// authoritatively at build). bed: 1/2/3. Returns null if data/county/tier missing.
+function amiRentPreview(fips, ami, bed) {
+  const h = (window.HUD_RENTS && window.HUD_RENTS.counties && fips
+    && window.HUD_RENTS.counties[fips]);
+  if (!h) return null;
+  const tier = h.rents && h.rents[String(ami)];
+  return tier ? (tier["br" + bed] ?? null) : null;
+}
 
 // Dispatcher: shows the LIHTC/Non-LIHTC toggle, then renders the chosen form.
 function openModelReview(jobId, intake) {
   _modelReview = { jobId, intake, dealType: "lihtc" };
   _nlT12Opex = null;
+  const wrap = $("#review-dealtype-wrap");
+  if (wrap) wrap.classList.remove("hidden");
   const tg = $("#review-dealtype");
   if (tg) {
-    tg.classList.remove("hidden");
     tg.querySelectorAll(".dt-opt").forEach(b =>
       b.classList.toggle("active", b.dataset.dt === "lihtc"));
   }
@@ -235,6 +250,7 @@ function openLihtcReview(jobId, intake) {
 // clean pre-v28 ModularZ market engine. Unit program + comp rents drive it.
 function openNonLihtcReview(jobId, intake) {
   _nlT12Opex = null;
+  _nlCountyFips = intake.county_fips || null;
   const seed = intake.values || {};
   // Comp scraper rents (median $/mo per bed) — pre-fill when the analyst already
   // ran comps for this subject. Keys are bed ints (0=studio,1,2,3).
@@ -254,23 +270,47 @@ function openNonLihtcReview(jobId, intake) {
     values: {
       deal_name: seed.deal_name || "",
       land_price: seed.acquisition_price ?? null,
+      program: AMI_PROGRAM.MIXED,
       units_1br: null, units_2br: null, units_3br: null,
+      ami1_pct: 20, ami1_level: "50",
+      ami2_pct: 55, ami2_level: "80",
+      ami3_pct: 25, ami3_level: "70",
       rent_1br: rentOf(1), rent_2br: rentOf(2), rent_3br: rentOf(3),
-      exit_cap: 5, perm_rate: 5.75,
+      exit_cap: 5,
+      senior_basis: "DSCR", senior_value: 1.2, senior_rate: 5.75, senior_amort: 35,
+      sub_amount: null, sub_rate: 3, sub_amort: 0,
     },
     fields: [
       { id: "deal_name", label: "Deal name", type: "text" },
       { id: "land_price", label: "Land purchase price ($)", type: "number",
         placeholder: "e.g. 5000000", help: "defaults to the DD acquisition price if blank" },
+      { id: "program", label: "Program", type: "select",
+        options: [AMI_PROGRAM.MIXED, AMI_PROGRAM.MARKET],
+        help: "Mixed-income drives the restricted AMI tiers; Market rate zeroes them" },
       { id: "units_1br", label: "1-BR units", type: "number", required: true, help: "modular product" },
       { id: "units_2br", label: "2-BR units", type: "number" },
       { id: "units_3br", label: "3-BR units", type: "number" },
-      { id: "rent_1br", label: "1-BR market rent ($/mo)", type: "number", required: true,
-        placeholder: "from comp scraper", help: compHelp(1) },
+      { id: "ami1_pct", label: "AMI tier 1 — % of units", type: "number", help: "default 20%" },
+      { id: "ami1_level", label: "AMI tier 1 — level (%)", type: "select", options: AMI_LEVELS },
+      { id: "ami2_pct", label: "AMI tier 2 — % of units", type: "number", help: "default 55%" },
+      { id: "ami2_level", label: "AMI tier 2 — level (%)", type: "select", options: AMI_LEVELS },
+      { id: "ami3_pct", label: "AMI tier 3 — % of units", type: "number", help: "remainder; default 25%" },
+      { id: "ami3_level", label: "AMI tier 3 — level (%)", type: "select", options: AMI_LEVELS },
+      { id: "rent_1br", label: "1-BR market rent ($/mo)", type: "number",
+        placeholder: "from comp scraper", help: "market remainder only — " + compHelp(1) },
       { id: "rent_2br", label: "2-BR market rent ($/mo)", type: "number", help: compHelp(2) },
       { id: "rent_3br", label: "3-BR market rent ($/mo)", type: "number", help: compHelp(3) },
       { id: "exit_cap", label: "Exit cap (%)", type: "number", help: "base-case exit cap; default 5.0" },
-      { id: "perm_rate", label: "Perm loan rate (%)", type: "number", help: "default 5.75" },
+      { id: "senior_basis", label: "Senior loan — sizing", type: "select",
+        options: ["DSCR", "LTV", "LTC", "Fixed $"], help: "how the senior perm loan is sized" },
+      { id: "senior_value", label: "Senior — value", type: "number",
+        help: "DSCR ratio (e.g. 1.20), LTV/LTC % (e.g. 75), or $ if Fixed" },
+      { id: "senior_rate", label: "Senior — rate (%)", type: "number", help: "default 5.75" },
+      { id: "senior_amort", label: "Senior — amort (yrs)", type: "number", help: "default 35" },
+      { id: "sub_amount", label: "Subordinate / soft loan ($)", type: "number",
+        placeholder: "blank = none", help: "a 2nd perm loan on top (city/gap/seller); reflected in Levered IRR" },
+      { id: "sub_rate", label: "Subordinate — rate (%)", type: "number", help: "0 for a 0% soft loan" },
+      { id: "sub_amort", label: "Subordinate — amort (yrs)", type: "number", help: "0 = interest-only / deferred" },
     ],
     derive: deriveNonLihtcPreview,
   }, (v) => {
@@ -284,11 +324,38 @@ function openNonLihtcReview(jobId, intake) {
     });
     const financing = {};
     if (num(v.exit_cap) != null) financing.exit_cap = num(v.exit_cap) / 100;
-    if (num(v.perm_rate) != null) financing.perm_rate = num(v.perm_rate) / 100;
     const nonlihtc = { units_by_bed: units, rents_by_bed: rents };
     if (num(v.land_price) != null) nonlihtc.land_cost = num(v.land_price);
     if (Object.keys(financing).length) nonlihtc.financing = financing;
     if (_nlT12Opex && Object.keys(_nlT12Opex).length) nonlihtc.opex = _nlT12Opex;
+    // Debt stack: senior perm (sizing basis + rate/amort) + optional subordinate.
+    const loans = [];
+    const sb = (v.senior_basis || "DSCR").toLowerCase().replace(" $", "").replace("$", "");
+    const sv = num(v.senior_value);
+    const senior = { label: "Senior Perm", basis: sb === "fixed" ? "fixed" : sb,
+      rate: num(v.senior_rate) != null ? num(v.senior_rate) / 100 : undefined,
+      amort: num(v.senior_amort) };
+    // LTV/LTC entered as a percent (75) -> fraction; DSCR/Fixed taken as-is.
+    if (sv != null) senior.value = (sb === "ltv" || sb === "ltc") ? sv / 100 : sv;
+    loans.push(senior);
+    if (num(v.sub_amount) != null && num(v.sub_amount) > 0) {
+      const sa = num(v.sub_amort);
+      loans.push({ label: "Subordinate / Soft", basis: "fixed", value: num(v.sub_amount),
+        rate: num(v.sub_rate) != null ? num(v.sub_rate) / 100 : 0,
+        amort: sa || 0, io: !sa });
+    }
+    nonlihtc.loans = loans;
+    // Mixed-income: send the AMI allocation (pct as fraction, ami as int). Tiers
+    // with 0% are dropped; the server nets restricted units out of the market mix.
+    if (v.program === AMI_PROGRAM.MIXED) {
+      const alloc = [[v.ami1_pct, v.ami1_level], [v.ami2_pct, v.ami2_level], [v.ami3_pct, v.ami3_level]]
+        .map(([p, a]) => ({ pct: num(p), ami: Number(a) }))
+        .filter(t => t.pct != null && t.pct > 0);
+      if (alloc.length) {
+        nonlihtc.ami_allocation = alloc.map(t => ({ pct: t.pct / 100, ami: t.ami }));
+        if (_nlCountyFips) nonlihtc.county_fips = _nlCountyFips;
+      }
+    }
     launch({
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -388,7 +455,7 @@ function renderT12Result(status, j) {
     ${notes ? `<ul class="t12-notes">${notes}</ul>` : ""}`;
 }
 
-// Live preview for the non-LIHTC form — mirrors the engine's market-mode rules.
+// Live preview for the non-LIHTC form — mirrors the engine's allocation rules.
 function deriveNonLihtcPreview(v) {
   const num = (x) => (x === null || x === undefined || x === "" ? 0 : Number(x));
   const u1 = num(v.units_1br), u2 = num(v.units_2br), u3 = num(v.units_3br);
@@ -396,36 +463,90 @@ function deriveNonLihtcPreview(v) {
   const mix = total > 0
     ? `${Math.round(u1 / total * 100)}% 1B · ${Math.round(u2 / total * 100)}% 2B · ${Math.round(u3 / total * 100)}% 3B`
     : "—";
-  const gpr = (u1 * num(v.rent_1br) + u2 * num(v.rent_2br) + u3 * num(v.rent_3br)) * 12;
-  return [
+  const mixed = v.program === AMI_PROGRAM.MIXED;
+  const rows = [
     { label: "Deal", value: v.deal_name || "—" },
     { label: "Land price (Dev Budget G7)", value: num(v.land_price) > 0 ? "$" + fmt(v.land_price) : "— DD default" },
+    { label: "Program", value: mixed ? "Mixed-income (AMI tiers)" : "Market rate" },
     { label: "Unit program (O11/O12/O13)", value: total > 0 ? `${u1} / ${u2} / ${u3} = ${total} units (+1 mgr)` : "— enter 1-BR" },
     { label: "→ Bed mix", value: mix },
-    { label: "Market rents 1B/2B/3B", value: `$${fmt(v.rent_1br || 0)} / $${fmt(v.rent_2br || 0)} / $${fmt(v.rent_3br || 0)}` },
-    { label: "→ Annual GPR (approx)", value: gpr > 0 ? "$" + fmt(Math.round(gpr)) : "—" },
-    { label: "Exit cap (Dashboard J5)", value: (num(v.exit_cap) || 5) + "%" },
-    { label: "Perm rate (Dashboard K12)", value: (num(v.perm_rate) || 5.75) + "%" },
-    { label: "Mode", value: "Market (restricted + affordable rows zeroed)" },
   ];
+
+  if (mixed) {
+    const tiers = [[num(v.ami1_pct), v.ami1_level], [num(v.ami2_pct), v.ami2_level],
+      [num(v.ami3_pct), v.ami3_level]].filter(([p]) => p > 0);
+    const sumPct = tiers.reduce((s, [p]) => s + p, 0);
+    rows.push({ label: "AMI tiers", value: tiers.length
+      ? tiers.map(([p, a]) => `${p}% @ ${a}% AMI`).join(" · ") : "— none" });
+    rows.push({ label: "→ Restricted / market split",
+      value: `${Math.min(sumPct, 100)}% restricted · ${Math.max(0, 100 - sumPct)}% market`
+        + (sumPct > 100 ? "  ⚠ over 100%" : "") });
+    // per-tier unit counts + AMI rents (1BR, from window.HUD_RENTS when loaded)
+    tiers.forEach(([p, a], i) => {
+      const units = total > 0 ? Math.round(total * p / 100) : 0;
+      const r1 = amiRentPreview(_nlCountyFips, a, 1);
+      rows.push({ label: `  Tier ${i + 1} (${a}% AMI)`,
+        value: `${units} units` + (r1 ? ` · 1BR cap ~$${fmt(r1)}/mo` : "") });
+    });
+    if (!_nlCountyFips) rows.push({ label: "  AMI rents",
+      value: "resolved from county at build (no ZIP on this DD)" });
+  } else {
+    const gpr = (u1 * num(v.rent_1br) + u2 * num(v.rent_2br) + u3 * num(v.rent_3br)) * 12;
+    rows.push({ label: "Market rents 1B/2B/3B",
+      value: `$${fmt(v.rent_1br || 0)} / $${fmt(v.rent_2br || 0)} / $${fmt(v.rent_3br || 0)}` });
+    rows.push({ label: "→ Annual GPR (approx)", value: gpr > 0 ? "$" + fmt(Math.round(gpr)) : "—" });
+  }
+  rows.push({ label: "Exit cap (Dashboard J5)", value: (num(v.exit_cap) || 5) + "%" });
+  // Debt stack
+  const sb = v.senior_basis || "DSCR";
+  const sval = v.senior_value;
+  const seniorDesc = sb === "Fixed $" ? `$${fmt(sval || 0)}`
+    : sb === "DSCR" ? `${sval || 1.2}x` : `${sval || 75}%`;
+  rows.push({ label: "Senior loan", value: `${sb} ${seniorDesc} @ ${num(v.senior_rate) || 5.75}% / ${num(v.senior_amort) || 35}yr` });
+  if (num(v.sub_amount) > 0) {
+    const io = !num(v.sub_amort);
+    rows.push({ label: "+ Subordinate / soft", value: `$${fmt(v.sub_amount)} @ ${num(v.sub_rate) || 0}% · ${io ? "IO/deferred" : (num(v.sub_amort) + "yr amort")}` });
+    rows.push({ label: "  → effect", value: "reflected in Levered IRR & Equity Multiple (CoC shows senior only)" });
+  }
+  return rows;
 }
 
 // ---------- scenario definitions (mirrors Python's run_lihtc_scenarios logic) ----------
 function defaultScenarios(resource) {
   const lf = resource === "High" || resource === "Highest";
   const base = [
-    { name: "Modular 5st — 100% 1B",        constr: "Modular", stories: 5,  podium: 1, lf: "No",  sh2B: 0,    sh3B: 0    },
-    { name: "Stick 5st — 50% 1B / 50% 2B",  constr: "Stick",   stories: 5,  podium: 1, lf: "No",  sh2B: 0.5,  sh3B: 0    },
-    { name: "Modular 12st — 100% 1B",        constr: "Modular", stories: 12, podium: 1, lf: "No",  sh2B: 0,    sh3B: 0    },
+    { constr: "Modular", stories: 5,  podium: 1, lf: "No",  shStudio: 0, sh2B: 0,    sh3B: 0    },
+    { constr: "Stick",   stories: 5,  podium: 1, lf: "No",  shStudio: 0, sh2B: 0.5,  sh3B: 0    },
+    { constr: "Modular", stories: 12, podium: 1, lf: "No",  shStudio: 0, sh2B: 0,    sh3B: 0    },
   ];
   if (lf) {
     base.push(
-      { name: "Modular 5st — Large Family",  constr: "Modular", stories: 5,  podium: 1, lf: "Yes", sh2B: 0.25, sh3B: 0.25 },
-      { name: "Stick 5st — Large Family",    constr: "Stick",   stories: 5,  podium: 1, lf: "Yes", sh2B: 0.25, sh3B: 0.25 },
-      { name: "Modular 12st — Large Family", constr: "Modular", stories: 12, podium: 1, lf: "Yes", sh2B: 0.25, sh3B: 0.25 },
+      { constr: "Modular", stories: 5,  podium: 1, lf: "Yes", shStudio: 0, sh2B: 0.25, sh3B: 0.25 },
+      { constr: "Stick",   stories: 5,  podium: 1, lf: "Yes", shStudio: 0, sh2B: 0.25, sh3B: 0.25 },
+      { constr: "Modular", stories: 12, podium: 1, lf: "Yes", shStudio: 0, sh2B: 0.25, sh3B: 0.25 },
     );
   }
+  base.forEach(s => { s.name = scenarioLabel(s); });
   return base;
+}
+
+// Build a human label from the scenario's LIVE params so the filename and PDF
+// always match what was actually run. The old static names caused an 82/18 mix
+// to download as "50% 2B" because the label never tracked the edited inputs.
+function scenarioLabel(s) {
+  const podium = Number(s.podium) > 0 ? `, podium ${Math.round(s.podium)}` : ", no podium";
+  if (s.lf === "Yes")
+    return `${s.constr} ${s.stories}st${podium} — Large Family (50% 1B · 25% 2B · 25% 3B)`;
+  const st = Math.round((s.shStudio || 0) * 100);
+  const b2 = Math.round((s.sh2B || 0) * 100);
+  const b3 = Math.round((s.sh3B || 0) * 100);
+  const b1 = Math.max(0, 100 - st - b2 - b3);
+  const parts = [];
+  if (st) parts.push(`${st}% Studio`);
+  if (b1) parts.push(`${b1}% 1B`);
+  if (b2) parts.push(`${b2}% 2B`);
+  if (b3) parts.push(`${b3}% 3B`);
+  return `${s.constr} ${s.stories}st${podium} — ${parts.join(" · ") || "—"}`;
 }
 
 const ScenarioPicker = {
@@ -452,27 +573,33 @@ const ScenarioPicker = {
   close() { $("#scenario-panel").classList.add("hidden"); },
 
   _render() {
-    const TAGS = { "Modular": "Modular", "Stick": "Stick" };
+    const beds = (i, bed, label, val) =>
+      `<span class="scn-mix-field"><input type="number" class="scn-mix-inp" data-idx="${i}" data-bed="${bed}" min="0" max="100" step="5" value="${val}"><span class="scn-mix-bed">${label}</span></span>`;
     $("#scn-list").innerHTML = [
       `<div class="scn-selall"><label><input type="checkbox" id="scn-all" checked> Select / deselect all</label></div>`,
       ...this.scenarios.map((s, i) => {
         const sfNote = s.constr === "Modular"
           ? "1B 497 · 2B 804 · 3B 994 SF"
           : (s.lf === "Yes" ? "1B 475 · 2B 735 · 3B 945 SF" : "1B 450 · 2B 700 · 3B 900 SF");
+        const b1 = Math.max(0, 100 - Math.round(s.shStudio*100) - Math.round(s.sh2B*100) - Math.round(s.sh3B*100));
         const mixHtml = s.lf === "Yes"
           ? `<span class="scn-mix"><span class="scn-mix-locked">50% 1B · 25% 2B · 25% 3B (locked — Large Family)</span></span>`
           : `<span class="scn-mix">
-              <span class="scn-mix-field"><span class="scn-mix-1b" id="scn-1b-${i}">${Math.round((1-s.sh2B-s.sh3B)*100)}%</span><span class="scn-mix-bed">1B</span></span>
-              <span class="scn-mix-sep">·</span>
-              <span class="scn-mix-field"><input type="number" class="scn-mix-inp" data-idx="${i}" data-bed="2" min="0" max="100" step="5" value="${Math.round(s.sh2B*100)}"><span class="scn-mix-bed">2B %</span></span>
-              <span class="scn-mix-sep">·</span>
-              <span class="scn-mix-field"><input type="number" class="scn-mix-inp" data-idx="${i}" data-bed="3" min="0" max="100" step="5" value="${Math.round(s.sh3B*100)}"><span class="scn-mix-bed">3B %</span></span>
+              ${beds(i, "studio", "Studio", Math.round(s.shStudio*100))}
+              ${beds(i, "1", "1B", b1)}
+              ${beds(i, "2", "2B", Math.round(s.sh2B*100))}
+              ${beds(i, "3", "3B", Math.round(s.sh3B*100))}
+              <span class="scn-mix-total" id="scn-total-${i}">= 100%</span>
              </span>`;
         return `<label class="scn-row">
           <input type="checkbox" class="scn-chk" data-idx="${i}" checked>
-          <span class="scn-name">${esc(s.name)}</span>
+          <span class="scn-name" id="scn-name-${i}">${esc(s.name)}</span>
           <span class="scn-tag scn-tag-${s.constr.toLowerCase()}">${esc(s.constr)}</span>
-          <span class="scn-meta">${esc(s.stories)} stories · podium ${s.podium} · ${esc(sfNote)}</span>
+          <span class="scn-controls">
+            <span class="scn-ctl"><span class="scn-ctl-lbl">Stories</span><input type="number" class="scn-num" data-idx="${i}" data-k="stories" min="1" max="40" step="1" value="${esc(s.stories)}"></span>
+            <span class="scn-ctl"><span class="scn-ctl-lbl">Podium</span><input type="number" class="scn-num" data-idx="${i}" data-k="podium" min="0" max="6" step="1" value="${esc(s.podium)}"></span>
+            <span class="scn-sf">${esc(sfNote)}</span>
+          </span>
           ${mixHtml}
         </label>`;
       }),
@@ -481,36 +608,65 @@ const ScenarioPicker = {
     document.getElementById("scn-all").addEventListener("change", (e) => {
       $("#scn-list").querySelectorAll(".scn-chk").forEach(cb => { cb.checked = e.target.checked; });
     });
-    $("#scn-list").querySelectorAll(".scn-mix-inp").forEach(inp => {
-      inp.addEventListener("input", () => {
-        const idx = inp.dataset.idx;
-        const i2 = $("#scn-list").querySelector(`.scn-mix-inp[data-idx="${idx}"][data-bed="2"]`);
-        const i3 = $("#scn-list").querySelector(`.scn-mix-inp[data-idx="${idx}"][data-bed="3"]`);
-        const v2 = Math.min(100, Math.max(0, Number(i2.value) || 0));
-        const v3 = Math.min(100, Math.max(0, Number(i3.value) || 0));
-        const el1 = document.getElementById(`scn-1b-${idx}`);
-        if (el1) el1.textContent = Math.max(0, 100 - v2 - v3) + "%";
-      });
+    // One delegated listener: any stories/podium/mix edit refreshes that row's
+    // live label + the running mix total.
+    $("#scn-list").addEventListener("input", (e) => {
+      const idx = e.target && e.target.dataset && e.target.dataset.idx;
+      if (idx != null) updateScnRow(idx);
     });
+    this.scenarios.forEach((_, i) => updateScnRow(i));
   },
 
   selected() {
-    const checks = [...($("#scn-list").querySelectorAll(".scn-chk"))];
-    return checks
+    return [...$("#scn-list").querySelectorAll(".scn-chk")]
       .filter(cb => cb.checked)
-      .map(cb => {
-        const i = Number(cb.dataset.idx);
-        const s = { ...this.scenarios[i] };
-        if (s.lf !== "Yes") {
-          const i2 = $("#scn-list").querySelector(`.scn-mix-inp[data-idx="${i}"][data-bed="2"]`);
-          const i3 = $("#scn-list").querySelector(`.scn-mix-inp[data-idx="${i}"][data-bed="3"]`);
-          if (i2) s.sh2B = Math.min(1, Math.max(0, Number(i2.value) / 100));
-          if (i3) s.sh3B = Math.min(1, Math.max(0, Number(i3.value) / 100));
-        }
-        return s;
-      });
+      .map(cb => scnRowFromDom(cb.dataset.idx));
   },
 };
+
+// Read one scenario row's current values straight from the DOM (the inputs are
+// the source of truth once rendered) and recompute its derived label + mix total.
+function scnRowFromDom(idx) {
+  const root = $("#scn-list");
+  const numv = (k, d) => {
+    const el = root.querySelector(`.scn-num[data-idx="${idx}"][data-k="${k}"]`);
+    const v = el ? Number(el.value) : d;
+    return Number.isFinite(v) ? v : d;
+  };
+  const base = ScenarioPicker.scenarios[idx] || {};
+  const s = {
+    constr: base.constr, lf: base.lf,
+    stories: Math.max(1, Math.round(numv("stories", base.stories))),
+    podium: Math.max(0, Math.round(numv("podium", base.podium))),
+    shStudio: 0, sh2B: 0, sh3B: 0,
+  };
+  if (s.lf === "Yes") {
+    s.sh2B = 0.25; s.sh3B = 0.25; s.mixTotal = 100;
+  } else {
+    const bedv = (b) => {
+      const el = root.querySelector(`.scn-mix-inp[data-idx="${idx}"][data-bed="${b}"]`);
+      const v = el ? Number(el.value) : 0;
+      return Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 0;
+    };
+    const st = bedv("studio"), one = bedv("1"), two = bedv("2"), three = bedv("3");
+    s.shStudio = st / 100; s.sh2B = two / 100; s.sh3B = three / 100;
+    s.mixTotal = st + one + two + three;
+  }
+  s.name = scenarioLabel(s);
+  return s;
+}
+
+function updateScnRow(idx) {
+  const s = scnRowFromDom(idx);
+  const nameEl = document.getElementById(`scn-name-${idx}`);
+  if (nameEl) nameEl.textContent = s.name;
+  const tot = document.getElementById(`scn-total-${idx}`);
+  if (tot && s.lf !== "Yes") {
+    const ok = s.mixTotal === 100;
+    tot.textContent = ok ? "= 100%" : `= ${s.mixTotal}% ⚠`;
+    tot.classList.toggle("scn-total-bad", !ok);
+  }
+}
 
 $("#scn-cancel").addEventListener("click", () => ScenarioPicker.close());
 $("#scn-go").addEventListener("click", () => {
@@ -518,6 +674,12 @@ $("#scn-go").addEventListener("click", () => {
   const err = $("#scn-error");
   if (!sel.length) {
     err.textContent = "Select at least one scenario.";
+    err.classList.remove("hidden");
+    return;
+  }
+  const badMix = sel.filter(s => s.lf !== "Yes" && s.mixTotal !== 100);
+  if (badMix.length) {
+    err.textContent = "Unit mix must total 100% — fix: " + badMix.map(s => `${s.name} (= ${s.mixTotal}%)`).join("; ");
     err.classList.remove("hidden");
     return;
   }
@@ -899,7 +1061,8 @@ function renderUnderwrite(uw) {
 function renderUnderwriteNonLihtc(uw) {
   const panel = $("#uw-panel");
   panel.classList.remove("hidden");
-  $("#uw-sub").textContent = `${uw.deal} · Non-LIHTC (market) · pre-v28 ModularZ engine`;
+  const mixed = uw.program === "mixed-income";
+  $("#uw-sub").textContent = `${uw.deal} · Non-LIHTC (${mixed ? "mixed-income" : "market"}) · pre-v28 ModularZ engine`;
 
   const PCT = new Set(["Levered IRR", "Cash-on-Cash", "Untrended Yield-on-Cost"]);
   const MULT = new Set(["Equity Multiple"]);
@@ -921,13 +1084,50 @@ function renderUnderwriteNonLihtc(uw) {
   ).join("");
   const models = (uw.models || []).map(m => `<li>${esc(m)}</li>`).join("");
   const haveReturns = keys.length > 0;
+
+  // Mixed-income AMI tier breakdown (from the server's allocation summary).
+  let amiBlock = "";
+  if (mixed && uw.ami && (uw.ami.tiers || []).length) {
+    const a = uw.ami;
+    const tierRows = a.tiers.map(t => {
+      const beds = t.by_bed || {};
+      const rents = t.rents || {};
+      const bedStr = [1, 2, 3].filter(b => beds[b]).map(b =>
+        `${beds[b]}×${b}BR@$${fmt(rents[b] || 0)}`).join(", ");
+      return `<tr><td class="col-field">${esc(t.ami)}% AMI</td>`
+        + `<td class="col-answer">${t.units} units — ${esc(bedStr || "—")}</td></tr>`;
+    }).join("");
+    amiBlock = `<h3 class="section-head">AMI allocation</h3>
+      <table>${tierRows}
+        <tr><td class="col-field">Restricted / market</td>
+        <td class="col-answer">${a.restricted_units} restricted · ${a.market_units} market · ${a.manager_units} mgr</td></tr>
+      </table>`;
+  }
+  // Debt stack (senior + optional subordinate).
+  let loanBlock = "";
+  if (uw.loans && (uw.loans.loans || []).length) {
+    const loanRows = uw.loans.loans.map(l => {
+      const desc = l.role === "senior"
+        ? `${(l.basis || "").toUpperCase()} ${l.value ?? "—"} @ ${l.rate != null ? (l.rate * 100).toFixed(2) + "%" : "—"} / ${l.amort || "—"}yr`
+        : `$${fmt(l.amount || 0)} @ ${l.rate != null ? (l.rate * 100).toFixed(2) + "%" : "0%"} · ${l.io ? "IO/deferred" : (l.amort + "yr")}`;
+      return `<tr><td class="col-field">${esc(l.label)}</td><td class="col-answer">${esc(desc)}</td></tr>`;
+    }).join("");
+    const unmod = (uw.loans.unmodelled || []).length
+      ? `<tr><td class="col-field">Not modelled</td><td class="col-answer">${esc(uw.loans.unmodelled.join(", "))} (no workbook slot)</td></tr>` : "";
+    loanBlock = `<h3 class="section-head">Debt stack</h3><table>${loanRows}${unmod}</table>
+      <p class="hint">Levered IRR &amp; Equity Multiple reflect the full stack (senior + subordinate). Cash-on-Cash &amp; Yield-on-Cost are senior-only / unlevered.</p>`;
+  }
+  const note = mixed
+    ? "Mixed-income: restricted AMI units carry CTCAC/MTSP gross caps (by county); any market remainder uses comp $/mo. Restricted units are netted against the unit program. Studios aren't modeled."
+    : "Market mode: restricted set-aside &amp; affordable unit rows zeroed; rents are the comp $/mo. Studios aren't modeled (no modular studio product).";
   $("#uw-body").innerHTML = `
-    <p class="combined">Market model generated on the clean pre-v28 ModularZ engine — download is a .zip:</p>
+    <p class="combined">${mixed ? "Mixed-income" : "Market"} model generated on the clean pre-v28 ModularZ engine — download is a .zip:</p>
     <ul class="uw-models">${models}</ul>
+    ${amiBlock}
     ${haveReturns
       ? `<h3 class="section-head">Headline returns</h3><table>${retRows}</table>`
       : `<p class="hint">Returns didn't recalc server-side — open the .xlsx (it recalcs on load).</p>`}
-    <p class="hint">Market mode: restricted set-aside &amp; affordable unit rows zeroed; rents are the comp $/mo. Studios aren't modeled (no modular studio product).</p>`;
+    <p class="hint">${note}</p>`;
 }
 
 function renderOM(om) {

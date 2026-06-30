@@ -125,9 +125,13 @@
           <div>
             <h2 class="recent-head">Review &amp; edit model inputs</h2>
             <p class="hint" id="review-sub"></p>
-            <div id="review-dealtype" class="dealtype-toggle hidden">
-              <button type="button" class="dt-opt active" data-dt="lihtc">LIHTC</button>
-              <button type="button" class="dt-opt" data-dt="nonlihtc">Non-LIHTC (Market)</button>
+            <div id="review-dealtype-wrap" class="dealtype-wrap hidden">
+              <span class="dealtype-lbl">Model type</span>
+              <div id="review-dealtype" class="dealtype-toggle">
+                <button type="button" class="dt-opt active" data-dt="lihtc">LIHTC (tax credit)</button>
+                <button type="button" class="dt-opt" data-dt="nonlihtc">Non-LIHTC (Market)</button>
+              </div>
+              <span class="dealtype-hint">Pick before generating — LIHTC builds tax-credit scenarios; Non-LIHTC builds a market/mixed model.</span>
             </div>
           </div>
           <div class="status-actions">
@@ -145,7 +149,7 @@
       <section id="scenario-panel" class="panel hidden">
         <div class="review-head">
           <div>
-            <h2 class="recent-head">Select scenarios to generate</h2>
+            <h2 class="recent-head">Select scenarios to generate <span class="model-badge">LIHTC tax-credit</span></h2>
             <p class="hint" id="scn-sub"></p>
           </div>
           <div class="status-actions">
@@ -281,6 +285,9 @@
   </main>
 
   <script>window.SECTIONS = {{ sections | tojson }};</script>
+  <!-- AMI rent tables for the non-LIHTC mixed-income preview (window.HUD_RENTS / CA_ZIP_COUNTY) -->
+  <script src="{{ url_for('static', filename='hud_rents.js') }}"></script>
+  <script src="{{ url_for('static', filename='ca_zip_county.js') }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
