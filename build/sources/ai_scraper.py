@@ -31,6 +31,8 @@ Scope of data (search-results page):
 import json
 import os
 import re
+import threading
+import time
 import urllib.parse
 import urllib.request
 
@@ -46,6 +48,24 @@ BEDS_SLUG = {0: "studio_beds", 1: "1-_beds", 2: "2-_beds",
              3: "3-_beds", 4: "4-_beds"}
 DEFAULT_LIMIT = 50
 MAX_MARKDOWN_CHARS = 20000   # Zillow pages are large; first 20k has ~17 unique listings
+
+# Global Firecrawl pacing. Per-bed scrapes now run in parallel (collect_comps), so
+# the old per-call 5s sleep inside enrich_comps no longer bounds the request rate.
+# This throttle serializes the START of every Firecrawl request across all threads
+# to >= FIRECRAWL_MIN_INTERVAL seconds apart (the render/Gemini work still overlaps).
+FIRECRAWL_MIN_INTERVAL = float(os.environ.get("FIRECRAWL_MIN_INTERVAL", "3"))
+_fc_throttle_lock = threading.Lock()
+_fc_last_start = [0.0]
+
+
+def _firecrawl_throttle():
+    """Block until at least FIRECRAWL_MIN_INTERVAL has elapsed since the last
+    Firecrawl request start, then stamp this start. Thread-safe."""
+    with _fc_throttle_lock:
+        wait = FIRECRAWL_MIN_INTERVAL - (time.monotonic() - _fc_last_start[0])
+        if wait > 0:
+            time.sleep(wait)
+        _fc_last_start[0] = time.monotonic()
 
 
 # ---- credentials ----------------------------------------------------------------
@@ -86,8 +106,8 @@ def _firecrawl_scrape(url: str, timeout: int = 90) -> str:
     waitFor=3000 gives the React app time to hydrate the listing cards.
     Returns the markdown string (may be empty if the page 404s or blocks).
     Retries up to 3 times: 429 rate-limit gets a 60s back-off; other errors get 8s/16s."""
-    import time
     import urllib.error as _ue
+    _firecrawl_throttle()   # global pacing across parallel bed scrapes
     payload = json.dumps({
         "url": url,
         "formats": ["markdown"],
@@ -259,14 +279,22 @@ def _gemini_extract_detail(markdown: str, timeout: int = 60) -> dict:
 _detail_cache: dict = {}   # url -> detail dict; persists within a Python session
 
 
-def enrich_comps(comps: list, bedrooms: int, timeout: int = 90) -> list:
+def enrich_comps(comps: list, bedrooms: int, timeout: int = 90, progress=None) -> list:
     """Second-pass: scrape each comp's Zillow property page to fill sqft/amenities/baths.
 
     Modifies the comp dicts in place. Silently skips if listing_url is absent or
     if the scrape/extract fails (avoids breaking the grid over one bad URL).
-    Sleeps 5s between uncached Firecrawl requests to stay within free-tier rate limits."""
-    import time
-    for c in comps:
+    Firecrawl request pacing is handled globally by _firecrawl_throttle (so parallel
+    bed scrapes stay within free-tier rate limits without per-call sleeps).
+
+    progress(done, total, comp) is called (if given) before each comp is enriched."""
+    n = len(comps)
+    for i, c in enumerate(comps, 1):
+        if progress:
+            try:
+                progress(i, n, c)
+            except Exception:
+                pass
         url = c.get("listing_url")
         if not url:
             continue
@@ -276,7 +304,6 @@ def enrich_comps(comps: list, bedrooms: int, timeout: int = 90) -> list:
                 detail = _detail_cache[url]
             else:
                 print(f"  [ai_scraper] detail → {url}")
-                time.sleep(5)   # Firecrawl free-tier rate limit guard
                 md = _firecrawl_scrape(url, timeout=timeout)
                 detail = _gemini_extract_detail(md, timeout=60)
                 _detail_cache[url] = detail

@@ -141,19 +141,26 @@ def _max(xs):
 
 
 def collect_comps(subject_addr, beds, radius_mi, top_n, demo=False, use_avm=False,
-                  subj_sqft=None, source="ai"):
+                  subj_sqft=None, source="ai", progress=None, max_workers=None):
     """-> (subject_geo, {bed: {comps, estimate}}). Shortlists top_n per bed.
 
     source='rentcast' (default): RentCast API; source='ai': Firecrawl+Claude scraper.
     When source='ai' and --avm is requested the AVM flag is silently ignored
-    (RentCast AVM is not available for the ai source)."""
+    (RentCast AVM is not available for the ai source).
+
+    progress(bed, message) is called (if given) at each step of a bed's work, from
+    multiple threads when bed scrapes run in parallel — make it thread-safe.
+    For the AI source with >1 bed, beds are scraped concurrently (Firecrawl request
+    pacing stays bounded by ai_scraper._firecrawl_throttle)."""
     geo = {"matched_address": subject_addr, "lat": 34.2502, "lon": -118.5320} if demo \
         else geocode(subject_addr)
     subj_sqft = subj_sqft or {}
     zipcode = _extract_zip(geo.get("matched_address", ""))
-    by_bed = {}
-    for b in beds:
+
+    def _collect_bed(b):
         estimate = None
+        if progress:
+            progress(b, "scraping listings…")
         if demo:
             pool = (ai_scraper.demo_rentals(b) if source == "ai"
                     else rentcast.demo_rentals(b))
@@ -171,14 +178,32 @@ def collect_comps(subject_addr, beds, radius_mi, top_n, demo=False, use_avm=Fals
         comps = rollup_buildings(pool, geo["lat"], geo["lon"])
         shortlisted = comps[:top_n]
         if source == "ai" and not demo:
-            ai_scraper.enrich_comps(shortlisted, b)
+            def _enrich_progress(done, total, _c):
+                if progress:
+                    progress(b, f"enriching comp {done}/{total}…")
+            ai_scraper.enrich_comps(shortlisted, b, progress=_enrich_progress)
             # recompute value_ratio now that sqft is filled
             for c in shortlisted:
                 if c.get("unit_size_sf") is None and c.get("sqft"):
                     c["unit_size_sf"] = c["sqft"]
                 if c.get("base_rent") and c.get("unit_size_sf"):
                     c["value_ratio"] = round(c["base_rent"] / c["unit_size_sf"], 2)
-        by_bed[b] = {"comps": shortlisted, "estimate": estimate}
+        if progress:
+            progress(b, f"done — {len(shortlisted)} comp(s)")
+        return b, {"comps": shortlisted, "estimate": estimate}
+
+    by_bed = {}
+    # Parallelize live AI scrapes across bed types; demo/rentcast stay serial (cheap/local).
+    if source == "ai" and not demo and len(beds) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        workers = max_workers or min(len(beds), 3)
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for b, payload in ex.map(_collect_bed, beds):
+                by_bed[b] = payload
+    else:
+        for b in beds:
+            _b, payload = _collect_bed(b)
+            by_bed[_b] = payload
     return geo, by_bed
 
 

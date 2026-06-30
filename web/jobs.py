@@ -983,9 +983,22 @@ def run_comps(job):
     else:
         source, demo = "ai", True
         job["phase"] = f"Demo data (no API keys set) — beds {beds}…"
+
+    # Per-bed scrapes run in parallel; compose a live phase line from each bed's status.
+    def _bed_label(b):
+        return "Studio" if b == 0 else f"{b}BR"
+    _prog = {b: "queued" for b in beds}
+    _prog_lock = threading.Lock()
+
+    def _progress(b, msg):
+        with _prog_lock:
+            _prog[b] = msg
+            job["phase"] = "Rent comps — " + " · ".join(
+                f"{_bed_label(bb)}: {_prog[bb]}" for bb in beds)
+
     geo, by_bed = _comps.collect_comps(addr, beds, _comps.rentcast.DEFAULT_RADIUS_MI,
                                        inp.get("top", 4), demo=demo, use_avm=(source == "rentcast" and not demo),
-                                       source=source)
+                                       source=source, progress=_progress)
     job["geo"] = {"matched_address": geo["matched_address"],
                   "lat": round(geo["lat"], 6), "lon": round(geo["lon"], 6)}
     job["label"] = geo["matched_address"] + " — rent comps"
