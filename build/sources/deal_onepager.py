@@ -35,11 +35,23 @@ RED      = colors.HexColor("#B23A33")
 MID_GRAY = colors.HexColor("#A0B4CC")
 
 # ── Fonts ─────────────────────────────────────────────────────────────────────────
-_FONT_DIR = Path.home() / "Library" / "Fonts"
-pdfmetrics.registerFont(TTFont("Archivo",  str(_FONT_DIR / "Archivo.ttf")))
-pdfmetrics.registerFont(TTFont("Mono",     str(_FONT_DIR / "IBMPlexMono-Regular.ttf")))
-pdfmetrics.registerFont(TTFont("MonoBold", str(_FONT_DIR / "IBMPlexMono-SemiBold.ttf")))
-pdfmetrics.registerFont(TTFont("Serif",    str(_FONT_DIR / "SourceSerif4.ttf")))
+# Brand fonts are bundled in fonts/ so the PDF renders identically on Linux/Railway
+# (the macOS user font dir is also checked for local dev). If a face can't load, it
+# aliases to a built-in so PDF generation never crashes.
+_FONT_DIRS = [Path(__file__).resolve().parent / "fonts", Path.home() / "Library" / "Fonts"]
+_BRAND_FONTS = {"Archivo": "Archivo.ttf", "Mono": "IBMPlexMono-Regular.ttf",
+                "MonoBold": "IBMPlexMono-SemiBold.ttf", "Serif": "SourceSerif4.ttf"}
+_BUILTIN = {"Archivo": "Helvetica-Bold", "Mono": "Courier",
+            "MonoBold": "Courier-Bold", "Serif": "Helvetica"}
+
+for _name, _file in _BRAND_FONTS.items():
+    _path = next((d / _file for d in _FONT_DIRS if (d / _file).exists()), None)
+    try:
+        if _path is None:
+            raise FileNotFoundError(_file)
+        pdfmetrics.registerFont(TTFont(_name, str(_path)))
+    except Exception:  # noqa: BLE001 — alias the brand name to a built-in face
+        pdfmetrics.registerFont(pdfmetrics.Font(_name, _BUILTIN[_name], "WinAnsiEncoding"))
 
 # ── Page geometry ─────────────────────────────────────────────────────────────────
 W, H = letter   # 612 × 792 pt
