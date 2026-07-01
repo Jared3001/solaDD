@@ -129,17 +129,33 @@ def _sheet_target(zin, sheet_name):
     return tgt
 
 
+_CELL_STYLE_RE = re.compile(r'\ss="(\d+)"')
+
+
 def _set_cell_xml(xml, addr, value, is_text):
-    """Surgically set a cell's value in worksheet XML, dropping any formula."""
+    """Surgically set a cell's value in worksheet XML, dropping any formula but
+    PRESERVING the cell's style index (the ``s="N"`` attribute).
+
+    That style index is what carries the cell's number format and font. If it is
+    dropped, the cell falls back to style 0 (General format, default black font),
+    which is what broke the automated models' look: the unit-mix cells (I3/I5/I6,
+    numFmt ``0%``) rendered ``0.1`` instead of ``10%``, and the Modular/Stick
+    toggle (A36) lost its blue input-font so it no longer matched the other
+    dropdowns. Re-emitting the original ``s`` keeps both correct."""
+    pat = re.compile(r'<c r="%s"([^>]*?)(?:/>|>.*?</c>)' % re.escape(addr), re.S)
+    m = pat.search(xml)
+    if not m:
+        raise ValueError(f"cell {addr} not present in sheet XML (cannot patch)")
+    sm = _CELL_STYLE_RE.search(m.group(1))
+    s_attr = f' s="{sm.group(1)}"' if sm else ""
     if is_text:
         safe = str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        newc = f'<c r="{addr}" t="inlineStr"><is><t>{safe}</t></is></c>'
+        newc = f'<c r="{addr}"{s_attr} t="inlineStr"><is><t>{safe}</t></is></c>'
     else:
-        newc = f'<c r="{addr}"><v>{value}</v></c>'
-    pat = re.compile(r'<c r="%s"(?:[^>]*?)(?:/>|>.*?</c>)' % re.escape(addr), re.S)
-    if not pat.search(xml):
-        raise ValueError(f"cell {addr} not present in sheet XML (cannot patch)")
-    return pat.sub(newc, xml, count=1)
+        newc = f'<c r="{addr}"{s_attr}><v>{value}</v></c>'
+    # Replace via a function so the value text is never interpreted as a
+    # regex backreference (e.g. a project name containing a backslash).
+    return pat.sub(lambda _m: newc, xml, count=1)
 
 
 # --------------------------------------------------------------------------

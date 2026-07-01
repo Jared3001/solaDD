@@ -16,3 +16,7 @@ build/*.xlsm
 
 # local agent config/memory
 .claude/
+
+# local template backups
+web/models/*.bak
+web/models/*.claude-prev.xlsm.bak
