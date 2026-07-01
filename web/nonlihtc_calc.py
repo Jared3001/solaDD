@@ -16,7 +16,7 @@ recalcs cleanly. Full cell-map + rationale in repo `NONLIHTC_ENGINE_SPEC.md`.
 KEY behaviour — MARKET MODE: the engine defaults to a 100%-affordable allocation
 via two independent systems that BOTH must be neutralised, else units double-count:
   (a) the restricted set-aside  (Inputs!O27/O28 -> O32), and
-  (b) the affordable unit rows   ((Z+) Rent Roll!E12:E19, own H14x0.8/x0.2 formulas).
+  (b) the affordable unit rows   (Rent Roll!E12:E19, own H14x0.8/x0.2 formulas).
 `_MARKET_MODE_CELLS` zeroes both on every build.
 """
 from __future__ import annotations
@@ -37,10 +37,10 @@ MODEL_PATH = os.path.join(HERE, "models", "NonLIHTC_engine_template.xlsx")
 # Worksheet names in the engine workbook.
 SH_INPUTS = "Inputs"
 SH_DASH = "Dashboard"
-SH_BUDGET = "(Z+) Dev Budget"
-SH_OPEX = "(Z+) OpEx"
-SH_RENT = "(Z+) Rent Roll"
-SH_FIN = "(Z+) Financing"
+SH_BUDGET = "Dev Budget"
+SH_OPEX = "OpEx"
+SH_RENT = "Rent Roll"
+SH_FIN = "Financing"
 
 # Share the LIHTC engine's process cap so both engines together never OOM Railway.
 _RECALC_SEM = threading.Semaphore(2)
@@ -483,7 +483,7 @@ def build_from_dd(dd: dict, *, units_by_bed: dict, rents_by_bed: dict,
 # --------------------------------------------------------------------------
 import json as _json
 
-# Restricted tier blocks in (Z+) Rent Roll: tier slot -> {bed: row}.
+# Restricted tier blocks in Rent Roll: tier slot -> {bed: row}.
 # Slots 0/1 are native (12-15 "80% AMI", 16-19 "110% AMI"); slot 2 (46-49) is
 # the tier-C block added by build_mixedincome_template.py. bed 0=studio,1,2,3.
 TIER_ROWS = [

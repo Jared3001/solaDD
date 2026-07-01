@@ -318,19 +318,19 @@ function buildInputPatches(model) {
     add('Dashboard', 'E37', I.exitCap);      // C38 table: Exit Cap axis (x Rent Growth)
     add('Dashboard', 'B40', I.rentGrowth);   // C38 table: Rent Growth axis
 
-    // ----- (Z+) Dev Budget sheet (sheet3) -----
-    add('(Z+) Dev Budget', 'G7', I.landCost);
+    // ----- Dev Budget sheet (sheet3) -----
+    add('Dev Budget', 'G7', I.landCost);
     // Modular construction cost per unit by bed type (the modular price book).
-    add('(Z+) Dev Budget', 'E14', model.modCost1BR != null ? model.modCost1BR : 95000);
-    add('(Z+) Dev Budget', 'E15', model.modCost2BR != null ? model.modCost2BR : 140000);
-    add('(Z+) Dev Budget', 'E16', model.modCost3BR != null ? model.modCost3BR : 185000);
+    add('Dev Budget', 'E14', model.modCost1BR != null ? model.modCost1BR : 95000);
+    add('Dev Budget', 'E15', model.modCost2BR != null ? model.modCost2BR : 140000);
+    add('Dev Budget', 'E16', model.modCost3BR != null ? model.modCost3BR : 185000);
 
-    // ----- (Z+) Financing sheet (sheet5) -----
-    add('(Z+) Financing', 'D34', I.permLTV);
-    add('(Z+) Financing', 'H11', I.permDSCR);
-    add('(Z+) Financing', 'H21', I.permAmort);
+    // ----- Financing sheet (sheet5) -----
+    add('Financing', 'D34', I.permLTV);
+    add('Financing', 'H11', I.permDSCR);
+    add('Financing', 'H21', I.permAmort);
 
-    // ----- (Z+) Rent Roll: affordable (CTCAC AMI) rents + bed-mix allocation -----
+    // ----- Rent Roll: affordable (CTCAC AMI) rents + bed-mix allocation -----
     for (const ap of affRentRollPatches(model)) P.push(ap);
 
     return P;
@@ -356,7 +356,7 @@ function affRentRollPatches(model) {
     const util = utilEl ? (parseFloat(utilEl.value) || 0) : 0;
     const r = c.rents[tier];
     const net = v => Math.max(0, Math.round((v || 0) - util));
-    const RR = '(Z+) Rent Roll';
+    const RR = 'Rent Roll';
     const P = [];
     const add = (addr, val) => P.push({ sheet: RR, addr, value: val, isStr: false });
     let u1 = model.units1BR || 0, u2 = model.units2BR || 0, u3 = model.units3BR || 0;
@@ -385,14 +385,14 @@ function affRentRollPatches(model) {
     old_fileof = """    const FILE_OF = {
         'Inputs': 'xl/worksheets/sheet1.xml',
         'Dashboard': 'xl/worksheets/sheet2.xml',
-        '(Z+) Dev Budget': 'xl/worksheets/sheet3.xml'
+        'Dev Budget': 'xl/worksheets/sheet3.xml'
     };"""
     new_fileof = """    const FILE_OF = {
         'Inputs': 'xl/worksheets/sheet1.xml',
         'Dashboard': 'xl/worksheets/sheet2.xml',
-        '(Z+) Dev Budget': 'xl/worksheets/sheet3.xml',
-        '(Z+) Financing': 'xl/worksheets/sheet5.xml',
-        '(Z+) Rent Roll': 'xl/worksheets/sheet6.xml'
+        'Dev Budget': 'xl/worksheets/sheet3.xml',
+        'Financing': 'xl/worksheets/sheet5.xml',
+        'Rent Roll': 'xl/worksheets/sheet6.xml'
     };"""
     if html.count(old_fileof) != 1:
         sys.exit("FILE_OF block not found uniquely")
@@ -421,14 +421,14 @@ function affRentRollPatches(model) {
     html = html.replace(old_tail, new_tail, 1)
 
     # 5e. Fix the swapped YoC/CoC metric cells. Per the proforma formulas:
-    #   K8  = (Z+) OpEx!G39 = (NOI + IPMT debt interest)/equity  -> levered cash-on-cash
-    #   K11 = (Z+) OpEx!J38 = NOI / TDC                          -> yield on cost
+    #   K8  = OpEx!G39 = (NOI + IPMT debt interest)/equity  -> levered cash-on-cash
+    #   K11 = OpEx!J38 = NOI / TDC                          -> yield on cost
     # The Dashboard had them reversed (yoc<-K8, coc<-K11), which overstated the
     # negative dev spread. Point yoc->K11 and coc->K8.
-    old_metrics = ("            coc: __engineNum(hf, '(Z+) Financing', 'K11'),  // stabilized cash-on-cash\n"
-                   "            yoc: __engineNum(hf, '(Z+) Financing', 'K8'),   // going-in return on cost")
-    new_metrics = ("            coc: __engineNum(hf, '(Z+) Financing', 'K8'),   // levered cash-on-cash: (NOI - debt svc)/equity\n"
-                   "            yoc: __engineNum(hf, '(Z+) Financing', 'K11'),  // yield on cost: NOI / TDC")
+    old_metrics = ("            coc: __engineNum(hf, 'Financing', 'K11'),  // stabilized cash-on-cash\n"
+                   "            yoc: __engineNum(hf, 'Financing', 'K8'),   // going-in return on cost")
+    new_metrics = ("            coc: __engineNum(hf, 'Financing', 'K8'),   // levered cash-on-cash: (NOI - debt svc)/equity\n"
+                   "            yoc: __engineNum(hf, 'Financing', 'K11'),  // yield on cost: NOI / TDC")
     if html.count(old_metrics) != 1:
         sys.exit("YoC/CoC metric lines not found uniquely")
     html = html.replace(old_metrics, new_metrics, 1)
@@ -447,7 +447,7 @@ function buildSensiEngine() {
     let hf = null;
     try {
         hf = __buildEngine(model);
-        const sid = hf.getSheetId('(Z+) Monthly CF');
+        const sid = hf.getSheetId('Monthly CF');
         const cF = __colToIdx('F'), cDM = __colToIdx('DM');
         const toNum = v => { if (v instanceof Date) return Math.round((Date.UTC(v.getFullYear(), v.getMonth(), v.getDate()) - Date.UTC(1899, 11, 30)) / 86400000); return (typeof v === 'number') ? v : null; };
         const setCell = (sheet, a1, val) => { const s = hf.getSheetId(sheet); const ad = XLSX.utils.decode_cell(a1); hf.setCellContents({ sheet: s, row: ad.r, col: ad.c }, [[val]]); };
@@ -477,11 +477,11 @@ function buildSensiEngine() {
             intSteps.forEach(i => html += `<th>${fPct(model.intRate + i)}</th>`);
             html += '</tr></thead><tbody>';
             ltcSteps.forEach(lD => {
-                const lv = Math.max(0.2, Math.min(0.85, model.permLtc + lD)); setCell('(Z+) Financing', 'D34', lv);
+                const lv = Math.max(0.2, Math.min(0.85, model.permLtc + lD)); setCell('Financing', 'D34', lv);
                 html += `<tr><td class="y-axis">${fPct(lv, 0)} LTC</td>`;
                 intSteps.forEach(iD => {
                     const iv = model.intRate + iD; setCell('Dashboard', 'K12', iv);
-                    const coc = __engineNum(hf, '(Z+) Financing', 'K8');
+                    const coc = __engineNum(hf, 'Financing', 'K8');
                     html += `<td class="${lD === 0 && iD === 0 ? 'target' : ''}">${coc == null ? '—' : fPct(coc, 1)}</td>`;
                 });
                 html += '</tr>';
@@ -889,7 +889,7 @@ function updateModelFromUI() {'''
             html += '</tr></thead><tbody>';
             landSteps.forEach(ls => {
                 const lpu = Math.max(0, basePU + ls);
-                setCell('(Z+) Dev Budget', 'G7', lpu * (model.units || 0));
+                setCell('Dev Budget', 'G7', lpu * (model.units || 0));
                 html += `<tr><td class="y-axis">$${Math.round(lpu / 1000)}K/u</td>`;
                 capSteps.forEach(c => {
                     setCell('Dashboard', 'J5', model.capRate + c);

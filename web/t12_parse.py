@@ -4,7 +4,7 @@ t12_parse.py — turn a trailing-12-month (T-12) operating statement into the
 non-LIHTC engine's OpEx factors (PUPM = per-unit-per-month).
 
 WHY: the ModularZ market engine takes each OpEx line as a per-unit-per-month
-factor on `(Z+) OpEx` col D (see NONLIHTC_ENGINE_SPEC.md). A T-12 gives ANNUAL
+factor on `OpEx` col D (see NONLIHTC_ENGINE_SPEC.md). A T-12 gives ANNUAL
 dollars per line, so PUPM = annual / units / 12. Management is special — the
 engine wants it as a % of revenue, so we divide the T-12 management fee by the
 T-12 revenue instead.
@@ -42,7 +42,7 @@ import openpyxl
 
 # --------------------------------------------------------------------------- #
 # label alias map — friendly OpEx name -> regexes (ordered specific -> generic)
-# Each engine OpEx line on (Z+) OpEx col D; management is a % of revenue.
+# Each engine OpEx line on OpEx col D; management is a % of revenue.
 # --------------------------------------------------------------------------- #
 ALIASES = [
     ("opex_insurance",   [r"\binsurance\b", r"\bliability\b"]),

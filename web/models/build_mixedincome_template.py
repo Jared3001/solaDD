@@ -3,7 +3,7 @@
 build_mixedincome_template.py — Workstream A of NONLIHTC_MIXED_INCOME_SPEC.md.
 
 Appends a THIRD restricted tier block (rows 46-49 = 0/1/2/3BR) to the non-LIHTC
-engine's `(Z+) Rent Roll`, so a mixed-income deal can carry three AMI tiers
+engine's `Rent Roll`, so a mixed-income deal can carry three AMI tiers
 (default 50 / 80 / 70%) instead of the workbook's two native blocks
 (rows 12-15 "80% AMI", 16-19 "110% AMI").
 
@@ -38,7 +38,7 @@ import zipfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE = os.path.join(HERE, "NonLIHTC_engine_template.xlsx")
 BACKUP = os.path.join(HERE, "NonLIHTC_engine_template.orig.xlsx")
-SHEET6 = "xl/worksheets/sheet6.xml"  # (Z+) Rent Roll
+SHEET6 = "xl/worksheets/sheet6.xml"  # Rent Roll
 
 DST_ROWS = [46, 47, 48, 49]                  # tier-C block (0/1/2/3BR), empty band
 BED_LABEL = {0: "0BR", 1: "1BR", 2: "2BR", 3: "3BR"}
@@ -141,15 +141,15 @@ def transform_sheet6(xml: str) -> str:
 # FEATURE 2 — subordinate (soft/gap) PERMANENT loan
 # Adds a 2nd perm loan whose proceeds enter at refi and whose debt service hits
 # the levered cash flow, so Levered IRR/CoC faithfully reflect the added leverage.
-#   * params on (Z+) Financing: D43 amount, D44 rate, D45 amort-years (0 = IO/deferred)
-#   * 4 new (Z+) Monthly CF rows 106-109 (proceeds / interest / principal / payoff),
+#   * params on Financing: D43 amount, D44 rate, D45 amort-years (0 = IO/deferred)
+#   * 4 new Monthly CF rows 106-109 (proceeds / interest / principal / payoff),
 #     mirroring the senior perm rows 95-98 but reading the D43:D45 params
 #   * row-100 (levered CF) shared masters get the 4 new rows appended
 # Amount D43 defaults to 0 -> every new cell computes 0 -> output-identical to the
 # original (recalc-parity guard). The senior path is untouched.
 # --------------------------------------------------------------------------
-SHEET5 = "xl/worksheets/sheet5.xml"  # (Z+) Financing
-SHEET7 = "xl/worksheets/sheet7.xml"  # (Z+) Monthly CF
+SHEET5 = "xl/worksheets/sheet5.xml"  # Financing
+SHEET7 = "xl/worksheets/sheet7.xml"  # Monthly CF
 SUB_ROWS = {"proceeds": 106, "interest": 107, "principal": 108, "payoff": 109}
 # row-100 shared masters: (master col, si)
 CF100_MASTERS = [("F", 134), ("AL", 135), ("BR", 136), ("CX", 137)]
@@ -178,9 +178,9 @@ def add_sub_loan_financing(s5: str) -> str:
 
 # explicit per-column sub-loan formulas (no leading '='; XML-escaped at emit).
 # FIN = the sub-loan param cells; mirror the senior perm rows 95-98 exactly.
-_FIN_AMT = "'(Z+) Financing'!$D$43"
-_FIN_RT = "'(Z+) Financing'!$D$44"
-_FIN_AM = "'(Z+) Financing'!$D$45"
+_FIN_AMT = "'Financing'!$D$43"
+_FIN_RT = "'Financing'!$D$44"
+_FIN_AM = "'Financing'!$D$45"
 _RM = _FIN_RT + "*365.25/360/12"  # monthly rate
 
 
@@ -304,8 +304,8 @@ def verify() -> int:
 
     # mixed-income smoke: 10 restricted 1BR @ $1,500 in tier-C row 47 -> EGI rises
     cells = nl.split_inputs(market)
-    cells[("(Z+) Rent Roll", "E47")] = (10, False)
-    cells[("(Z+) Rent Roll", "I47")] = (1500, False)
+    cells[("Rent Roll", "E47")] = (10, False)
+    cells[("Rent Roll", "I47")] = (1500, False)
     smoke = recalc_on(TEMPLATE, cells=cells)
     egi_base, egi_mixed = new["Effective Gross Income"], smoke["Effective Gross Income"]
     print("\n=== mixed-income smoke (tier-C row 47: 10 units @ $1500) ===")
@@ -315,7 +315,7 @@ def verify() -> int:
     print("TIER-C FEEDS REVENUE:", "PASS" if rose else "FAIL")
 
     # --- Feature 2: subordinate-loan parity (amount 0 -> identical to senior-only) ---
-    FIN = "(Z+) Financing"
+    FIN = "Financing"
     sub0 = nl.split_inputs(market)
     sub0[(FIN, "D43")] = (0, False)
     out0 = recalc_on(TEMPLATE, cells=sub0)
