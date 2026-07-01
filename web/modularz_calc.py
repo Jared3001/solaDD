@@ -507,6 +507,11 @@ def _force_full_recalc(wbxml):
 # "broken" when the file is opened in Excel.
 _SUPPRESS_SHEETS = ("Sheet1",)
 
+# References to xl/calcChain.xml that must go when the part is dropped (see
+# build_download) — a dangling relationship/override would itself trigger a repair.
+_RELS_CALCCHAIN = re.compile(r'<Relationship [^>]*?calcChain[^>]*?/>')
+_CT_CALCCHAIN = re.compile(r'<Override PartName="/xl/calcChain\.xml"[^>]*?/>')
+
 
 def _hide_sheet(wbxml, name):
     """Set state="hidden" on a <sheet> entry in workbook.xml (if present)."""
@@ -558,11 +563,23 @@ def build_download(inputs_num=None, inputs_txt=None, tolerant=False):
             wbxml = _hide_sheet(wbxml, s)
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
             for it in zin.infolist():
+                # Drop the pre-baked calc chain: patching a formula cell (e.g. the
+                # I5/I6 unit-mix IFs) to a static value leaves calcChain.xml pointing
+                # at cells that are no longer formulas, so Excel flags "problem with
+                # content" and repairs on open. Removing the part + its two references
+                # (below) makes Excel rebuild the chain silently — it recalcs anyway
+                # because fullCalcOnLoad is set.
+                if it.filename == "xl/calcChain.xml":
+                    continue
                 data = zin.read(it.filename)
                 if it.filename == pf_target:
                     data = pfxml.encode("utf-8")
                 elif it.filename == "xl/workbook.xml":
                     data = wbxml.encode("utf-8")
+                elif it.filename == "xl/_rels/workbook.xml.rels":
+                    data = _RELS_CALCCHAIN.sub("", data.decode("utf-8")).encode("utf-8")
+                elif it.filename == "[Content_Types].xml":
+                    data = _CT_CALCCHAIN.sub("", data.decode("utf-8")).encode("utf-8")
                 zout.writestr(it, data)
     return buf.getvalue()
 
